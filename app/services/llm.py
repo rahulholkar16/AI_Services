@@ -12,7 +12,7 @@ os.environ["GROQ_API_KEY"] = os.getenv("GROQ_API_KEY");
 llm = ChatGroq(
     model="qwen/qwen3-32b",  # Free, fast, smart
     temperature=0,
-    max_tokens=700,
+    max_tokens=2000,
     api_key=os.getenv("GROQ_API_KEY")   
 )
 
