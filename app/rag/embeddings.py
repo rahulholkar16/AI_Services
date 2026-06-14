@@ -1,14 +1,13 @@
-from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_voyageai import VoyageAIEmbeddings
+import os
 
 _embeddings = None
 
-def get_embeddings() -> HuggingFaceEmbeddings:
+def get_embeddings():
     global _embeddings
     if _embeddings is None:
-        print("Loading embedding model...")
-        _embeddings = HuggingFaceEmbeddings(
-            model_name="flax-sentence-embeddings/st-codesearch-distilroberta-base",
-            model_kwargs={"device": "cpu"},
-            encode_kwargs={"normalize_embeddings": True}
+        _embeddings = VoyageAIEmbeddings(
+            model="voyage-code-3",  # ✅ Best for code, no download
+            voyage_api_key=os.getenv("VOYAGE_API_KEY")
         )
     return _embeddings

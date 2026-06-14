@@ -1,0 +1,7 @@
+fastapi
+uvicorn
+langgraph
+langchain
+python-dotenv
+chromadb
+langchain_voyageai
