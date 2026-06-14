@@ -17,11 +17,17 @@ from dotenv import load_dotenv
 load_dotenv()
 
 DATABASE_URL = os.getenv("DATABASE_URL", "")
-CLONE_DIR = "./cloned_repos"  # Jahan repos clone hote hain
+CLONE_DIR = "./cloned_repos"
 
-# ✅ postgres:// → postgresql:// fix
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+
+if "?" in DATABASE_URL:
+    if "sslmode" not in DATABASE_URL:
+        DATABASE_URL += "&sslmode=require"
+else:
+    if "sslmode" not in DATABASE_URL:
+        DATABASE_URL += "?sslmode=require"
 
 
 async def cleanup_old_repos():
@@ -67,6 +73,7 @@ async def cleanup_old_repos():
 async def lifespan(app: FastAPI):
     async with AsyncPostgresSaver.from_conn_string(
         DATABASE_URL,
+        pipeline=False  
     ) as checkpointer:
         await checkpointer.setup()
         state.agent = create_app_agent(checkpointer)
