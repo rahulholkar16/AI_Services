@@ -1,0 +1,15 @@
+# Python
+.venv/
+__pycache__/
+
+# Env
+.env
+
+# Data
+data/repos/
+
+# Vector DB
+chroma_db/
+
+# Python cache
+*.pyc
