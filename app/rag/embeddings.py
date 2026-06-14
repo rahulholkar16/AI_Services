@@ -1,4 +1,5 @@
-from langchain_voyageai import VoyageAIEmbeddings
+# app/rag/embeddings.py
+from langchain_google_genai import GoogleGenerativeAIEmbeddings
 import os
 
 _embeddings = None
@@ -6,8 +7,8 @@ _embeddings = None
 def get_embeddings():
     global _embeddings
     if _embeddings is None:
-        _embeddings = VoyageAIEmbeddings(
-            model="voyage-code-3",  # ✅ Best for code, no download
-            voyage_api_key=os.getenv("VOYAGE_API_KEY")
+        _embeddings = GoogleGenerativeAIEmbeddings(
+            model="models/text-embedding-004",
+            google_api_key=os.getenv("GOOGLE_API_KEY")
         )
     return _embeddings

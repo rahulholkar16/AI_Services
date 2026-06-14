@@ -4,11 +4,11 @@ langchain
 langchain-pinecone
 langchain-groq
 langchain-text-splitters
-langchain-voyageai
+langchain-google-genai
 langgraph
 langgraph-checkpoint-postgres
 python-dotenv
 uvicorn
 pinecone
-psycopg2-binary
+psycopg[binary]
 langchain-community
