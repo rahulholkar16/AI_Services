@@ -1,7 +1,7 @@
 from fastapi import FastAPI, HTTPException
 from contextlib import asynccontextmanager
 from app.services.llm import create_app_agent
-from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+from langgraph.checkpoint.memory import MemorySaver  # ✅ Ye import
 from app.api.chat import router as ChatRouter
 from app.api.repo import router as CloneRouter
 from app.api.ask import router as AskRouter
@@ -16,81 +16,46 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-DATABASE_URL = os.getenv("DATABASE_URL", "")
 CLONE_DIR = "./cloned_repos"
-
-if DATABASE_URL.startswith("postgres://"):
-    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
-
-if "?" in DATABASE_URL:
-    if "sslmode" not in DATABASE_URL:
-        DATABASE_URL += "&sslmode=require"
-else:
-    if "sslmode" not in DATABASE_URL:
-        DATABASE_URL += "?sslmode=require"
 
 
 async def cleanup_old_repos():
-    """
-    Cloned repos jo 1 din se purane hain unhe delete karo.
-    Har 6 ghante mein run hoga.
-    """
     while True:
         try:
             now = datetime.now()
             clone_path = os.path.join(os.getcwd(), CLONE_DIR)
-
             if os.path.exists(clone_path):
                 for owner_dir in os.listdir(clone_path):
                     owner_path = os.path.join(clone_path, owner_dir)
-
                     for repo_dir in os.listdir(owner_path):
                         repo_path = os.path.join(owner_path, repo_dir)
-
-                        # Last modified time check karo
-                        modified_time = datetime.fromtimestamp(
-                            os.path.getmtime(repo_path)
-                        )
-                        age = now - modified_time
-
-                        # 1 din se purana hai toh delete karo
-                        if age > timedelta(days=1):
+                        modified_time = datetime.fromtimestamp(os.path.getmtime(repo_path))
+                        if datetime.now() - modified_time > timedelta(days=1):
                             shutil.rmtree(repo_path)
-                            print(f"🗑️ Deleted old repo: {repo_path}")
-
-                    # Owner dir empty hai toh wo bhi delete karo
+                            print(f"🗑️ Deleted: {repo_path}")
                     if os.path.exists(owner_path) and not os.listdir(owner_path):
                         os.rmdir(owner_path)
-
         except Exception as e:
             print(f"Cleanup error: {e}")
-
-        # Har 6 ghante mein run karo
         await asyncio.sleep(6 * 60 * 60)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    async with AsyncPostgresSaver.from_conn_string(
-        DATABASE_URL,
-        pipeline=False  
-    ) as checkpointer:
-        await checkpointer.setup()
-        state.agent = create_app_agent(checkpointer)
-        print("Agent ready with Postgres memory!")
+    # ✅ MemorySaver — no DB needed
+    checkpointer = MemorySaver()
+    state.agent = create_app_agent(checkpointer)
+    print("Agent ready with Memory!")
 
-        # ✅ Cleanup task background mein start karo
-        cleanup_task = asyncio.create_task(cleanup_old_repos())
-        print("Cleanup task started!")
+    cleanup_task = asyncio.create_task(cleanup_old_repos())
 
-        yield
+    yield
 
-        # ✅ App band hone pe cleanup task cancel karo
-        cleanup_task.cancel()
-        try:
-            await cleanup_task
-        except asyncio.CancelledError:
-            print("Cleanup task stopped.")
+    cleanup_task.cancel()
+    try:
+        await cleanup_task
+    except asyncio.CancelledError:
+        pass
 
     print("Agent shutting down...")
 
@@ -119,15 +84,12 @@ def main():
     return {"msg": "ok"}
 
 
-# ✅ Manual delete endpoint bhi add kiya
 @app.delete("/cleanup/repo")
 async def manual_cleanup(repo_url: str):
-    """Manually ek specific repo delete karo."""
     try:
         parts = repo_url.rstrip("/").split("github.com/")[-1]
         owner, repo = parts.split("/")[:2]
         repo_path = os.path.join(CLONE_DIR, owner, repo)
-
         if os.path.exists(repo_path):
             shutil.rmtree(repo_path)
             return {"message": f"Deleted: {repo_path}"}
