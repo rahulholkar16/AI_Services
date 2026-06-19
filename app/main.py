@@ -1,7 +1,7 @@
 from fastapi import FastAPI, HTTPException
 from contextlib import asynccontextmanager
 from app.services.llm import create_app_agent
-from langgraph.checkpoint.memory import MemorySaver  # ✅ Ye import
+from langgraph.checkpoint.memory import MemorySaver
 from app.api.chat import router as ChatRouter
 from app.api.repo import router as CloneRouter
 from app.api.ask import router as AskRouter
@@ -42,7 +42,6 @@ async def cleanup_old_repos():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # ✅ MemorySaver — no DB needed
     checkpointer = MemorySaver()
     state.agent = create_app_agent(checkpointer)
     print("Agent ready with Memory!")
