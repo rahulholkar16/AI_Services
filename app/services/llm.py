@@ -10,7 +10,7 @@ os.environ["GROQ_API_KEY"] = os.getenv("GROQ_API_KEY");
 # llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash-lite");
 
 llm = ChatGroq(
-    model="qwen/qwen3-32b",  # Free, fast, smart
+    model="openai/gpt-oss-120b", 
     temperature=0,
     max_tokens=2000,
     api_key=os.getenv("GROQ_API_KEY")   
