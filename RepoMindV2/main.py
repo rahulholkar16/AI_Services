@@ -2,6 +2,7 @@ from fastapi import FastAPI;
 from fastapi.middleware.cors import CORSMiddleware;
 from contextlib import asynccontextmanager;
 from config.db import engine;
+from sqlalchemy import text;
 
 @asynccontextmanager
 async def lifespan (app: FastAPI):
@@ -12,7 +13,7 @@ async def lifespan (app: FastAPI):
     """
     try:
         async with engine.connect() as conn:
-            await conn.execute("SELECT 1")
+            await conn.execute(text("SELECT 1"))
         print("✅ PostgreSQL Connected")
     except Exception as e:
         print(f"❌ Failed to connect to PostgreSQL: {e}")
