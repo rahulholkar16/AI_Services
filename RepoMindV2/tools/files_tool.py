@@ -57,4 +57,39 @@ def list_directory (repo_full_name: str):
     except Exception as e:
         return f"Error listing directory: {str(e)}"
     
+@tool
+def read_file (repo_full_name: str, file_path: str):
+    """
+    Read a specific file from GitHub repo.
+    Use for understanding implementation details.
+    repo_full_name format: 'owner/repo'
+    file_path: 'src/auth.ts', 'app/page.tsx'
+    """
+    try:
+        url = f"https://api.github.com/repos/{repo_full_name}/contents/{file_path}"
+        res = requests.get(url, headers=HEADERS)
 
+        if not res.ok:
+            return f"File not found: {file_path}"
+
+        data = res.json()
+
+        # Binary file skip karo
+        ext = "." + file_path.split(".")[-1].lower() if "." in file_path else ""
+        if ext not in ALLOW_EXTENSIONS:
+            return f"Binary file skipped: {file_path}"
+
+        # Base64 decode karo
+        import base64
+        content = base64.b64decode(
+            data["content"]
+        ).decode("utf-8", errors="ignore")
+
+        # Limit karo — token save karo
+        if len(content) > 3000:
+            content = content[:3000] + "\n...[truncated]"
+
+        return f"File: {file_path}\n\n{content}"
+
+    except Exception as e:
+        return f"Error reading file: {str(e)}"
