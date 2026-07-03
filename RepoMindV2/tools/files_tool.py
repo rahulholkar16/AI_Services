@@ -13,7 +13,7 @@ IGNORE_DIRS = {
 
 ALLOW_EXTENSIONS = {
     ".py", ".js", ".ts", ".tsx", ".jsx",
-    ".json", ".md", ".yaml", ".yml", ".tomal",
+    ".json", ".md", ".yaml", ".yml", ".toml",
     ".css", ".html", ".sh", ".go", ".rs",
     ".java", ".c", ".cpp", ".c++", ".h", ".prisma"
 }
@@ -93,3 +93,33 @@ def read_file (repo_full_name: str, file_path: str):
 
     except Exception as e:
         return f"Error reading file: {str(e)}"
+
+@tool
+def search_file(repo_full_name: str, query: str) -> str:
+    """
+    Search files by name in GitHub repo.
+    Use for finding specific files like auth, db, api, config.
+    repo_full_name format: 'owner/repo'
+    query: 'auth', 'database', 'middleware', 'route'
+    """
+    try:
+        url = "https://api.github.com/search/code"
+        params = {
+            "q": f"repo:{repo_full_name} filename:{query}",
+            "per_page": 10
+        }
+        res = requests.get(url, headers=HEADERS, params=params)
+
+        if not res.ok:
+            return f"Search failed: {res.status_code}"
+
+        items = res.json().get("items", [])
+
+        if not items:
+            return f"No files found for: {query}"
+
+        output = [f"📄 {item['path']}" for item in items]
+        return "\n".join(output)
+
+    except Exception as e:
+        return f"Error searching file: {str(e)}"
