@@ -18,6 +18,7 @@ ALLOW_EXTENSIONS = {
     ".java", ".c", ".cpp", ".c++", ".h", ".prisma"
 }
 
+# List ALL files in GitHub repo recursively
 @tool
 def list_directory (repo_full_name: str):
     """
@@ -56,7 +57,8 @@ def list_directory (repo_full_name: str):
 
     except Exception as e:
         return f"Error listing directory: {str(e)}"
-    
+
+# Read a specific file from GitHub repo  
 @tool
 def read_file (repo_full_name: str, file_path: str):
     """
@@ -94,6 +96,7 @@ def read_file (repo_full_name: str, file_path: str):
     except Exception as e:
         return f"Error reading file: {str(e)}"
 
+# Search file by name in GitHub repo
 @tool
 def search_file(repo_full_name: str, query: str) -> str:
     """
