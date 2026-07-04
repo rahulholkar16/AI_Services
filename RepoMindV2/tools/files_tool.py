@@ -1,5 +1,6 @@
 import requests;
 from langchain.tools import tool;
+import base64;
 
 HEADERS = {
     # In future We add a Token based HEADER
@@ -81,8 +82,6 @@ def read_file (repo_full_name: str, file_path: str):
         if ext not in ALLOW_EXTENSIONS:
             return f"Binary file skipped: {file_path}"
 
-        # Base64 decode karo
-        import base64
         content = base64.b64decode(
             data["content"]
         ).decode("utf-8", errors="ignore")
@@ -98,7 +97,7 @@ def read_file (repo_full_name: str, file_path: str):
 
 # Search file by name in GitHub repo
 @tool
-def search_file(repo_full_name: str, query: str) -> str:
+def search_file (repo_full_name: str, query: str) -> str:
     """
     Search files by name in GitHub repo.
     Use for finding specific files like auth, db, api, config.
@@ -126,3 +125,33 @@ def search_file(repo_full_name: str, query: str) -> str:
 
     except Exception as e:
         return f"Error searching file: {str(e)}"
+
+@tool
+def search_code (repo_full_name: str, query: str) -> str:
+    """
+    Search for exact keyword or pattern inside code files.
+    Use for finding specific functions, variables, imports.
+    repo_full_name format: 'owner/repo'
+    query: 'JWT', 'useState', 'db.connect', 'getUserById'
+    """
+    try:
+        url = "https://api.github.com/search/code"
+        params = {
+            "q": f"repo:{repo_full_name} {query}",
+            "per_page": 10
+        }
+        res = requests.get(url, headers=HEADERS, params=params)
+
+        if not res.ok:
+            return f"Search failed: {res.status_code}"
+
+        items = res.json().get("items", [])
+
+        if not items:
+            return f"No code found for: {query}"
+
+        output = [f"📄 {item['path']}" for item in items]
+        return "\n".join(output)
+
+    except Exception as e:
+        return f"Error searching code: {str(e)}"
