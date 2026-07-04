@@ -126,6 +126,7 @@ def search_file (repo_full_name: str, query: str) -> str:
     except Exception as e:
         return f"Error searching file: {str(e)}"
 
+# Search code inside files in GitHub repo
 @tool
 def search_code (repo_full_name: str, query: str) -> str:
     """
