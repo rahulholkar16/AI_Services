@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException;
 from pydantic import BaseModel;
 from app.rag import get_vector_store, load_repo_documents, chunk_documents;
+from app.utils.Repo_Full_Name_Extracter import extract_full_name;
 
 router = APIRouter(
     prefix="/api/repo",
@@ -9,7 +10,7 @@ router = APIRouter(
 );
 
 class IndexRequest(BaseModel):
-    repo_full_name: str;
+    repo_url: str;
 
 @router.post("/index")
 async def index_repo(request: IndexRequest):
@@ -18,7 +19,8 @@ async def index_repo(request: IndexRequest):
     This will fetch all files, chunk them, and store embeddings in Pinecone.
     """
     try:
-        docs = load_repo_documents(request.repo_full_name);
+        repo_full_name = extract_full_name(request.repo_url);
+        docs = load_repo_documents(repo_full_name);
         if not docs:
             raise HTTPException(status_code=404, detail="No documents found in the repository.");
 
