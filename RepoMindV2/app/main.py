@@ -1,8 +1,12 @@
 from fastapi import FastAPI;
 from fastapi.middleware.cors import CORSMiddleware;
 from contextlib import asynccontextmanager;
-from config.db import engine;
+from app.config.db import engine;
+from app.config.db_graph import init_agent;
 from sqlalchemy import text;
+from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver;
+# Routes
+from app.api import repo_router, agent_router;
 
 @asynccontextmanager
 async def lifespan (app: FastAPI):
@@ -19,12 +23,10 @@ async def lifespan (app: FastAPI):
         print(f"❌ Failed to connect to PostgreSQL: {e}")
         raise
 
-    yield
-    print("Application is Stoped");
-    """
-        We close the DB connection and Agent and Other temp memory.
-    """
+    async with init_agent():
+        yield
 
+    print("Application is Stopped")
     await engine.dispose()
     print("PostgreSQL Connection Pool Closed")
 
@@ -37,6 +39,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(repo_router);
+app.include_router(agent_router);
 
 @app.get("/")
 def main ():

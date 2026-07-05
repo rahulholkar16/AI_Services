@@ -1,2 +1,28 @@
-SQLAlchemy
 fastapi
+uvicorn
+python-dotenv
+
+# Database
+sqlalchemy
+asyncpg
+psycopg[binary]
+psycopg-pool
+
+# LangChain / LangGraph
+langchain
+langchain-core
+langchain-groq
+langchain-google-genai
+langchain-pinecone
+langchain-text-splitters
+langgraph
+langgraph-checkpoint-postgres
+
+# Vector DB
+pinecone
+
+# GitHub API
+requests
+
+# Utilities
+pydantic
