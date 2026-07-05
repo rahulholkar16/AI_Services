@@ -1,14 +1,28 @@
 fastapi
-gitpython
+uvicorn
+python-dotenv
+
+# Database
+sqlalchemy
+asyncpg
+psycopg[binary]
+psycopg-pool
+
+# LangChain / LangGraph
 langchain
-langchain-pinecone
+langchain-core
 langchain-groq
-langchain-text-splitters
 langchain-google-genai
+langchain-pinecone
+langchain-text-splitters
 langgraph
 langgraph-checkpoint-postgres
-python-dotenv
-uvicorn
+
+# Vector DB
 pinecone
-psycopg[binary]
-langchain-community
+
+# GitHub API
+requests
+
+# Utilities
+pydantic
