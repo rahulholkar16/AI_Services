@@ -1,4 +1,5 @@
 import requests;
+import time;
 from fastapi import APIRouter, HTTPException;
 from pydantic import BaseModel;
 from app.rag import get_vector_store, load_repo_documents, chunk_documents;
@@ -20,39 +21,35 @@ class TreeRequest(BaseModel):
 
 @router.post("/index")
 async def index_repo(request: IndexRequest):
-    """
-    Index a GitHub repository for semantic search.
-    This will fetch all files, chunk them, and store embeddings in Pinecone.
-    """
     try:
-        repo_full_name = extract_full_name(request.repo_url);
-        docs = load_repo_documents(repo_full_name);
+        repo_full_name = extract_full_name(request.repo_url)
+        docs = load_repo_documents(repo_full_name)
         if not docs:
-            raise HTTPException(status_code=404, detail="No documents found in the repository.");
+            raise HTTPException(status_code=404, detail="No documents found in the repository.")
 
-        chunks = chunk_documents(docs);
+        chunks = chunk_documents(docs)
         if not chunks:
-            raise HTTPException(status_code=500, detail="Failed to chunk documents.");
+            raise HTTPException(status_code=500, detail="Failed to chunk documents.")
 
-        vector_store = get_vector_store();
-        batch_size = 50
+        vector_store = get_vector_store()
+        batch_size = 20 
         total = len(chunks)
 
         for i in range(0, total, batch_size):
             batch = chunks[i:i + batch_size]
             vector_store.add_documents(batch)
             print(f"Indexed {min(i + batch_size, total)}/{total} chunks")
+            time.sleep(4);  
 
         return {
             "message": f"Indexed {len(chunks)} chunks from {repo_full_name}.",
             "repo_full_name": repo_full_name,
             "total_chunks": total,
-        };
+        }
     except HTTPException:
-        raise           
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e));
-
+        raise HTTPException(status_code=500, detail=str(e))
 
 def _build_file_tree(paths: list[str]) -> list[dict]:
     """
