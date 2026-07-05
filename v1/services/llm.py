@@ -6,11 +6,9 @@ from langchain.agents.middleware import SummarizationMiddleware;
 from app.tools.tools import list_directory, search_code, search_file, read_file, search_codebase, search_bugs_in_file
 from langchain_groq import ChatGroq
 load_dotenv();
-os.environ["GROQ_API_KEY"] = os.getenv("GROQ_API_KEY");
-# llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash-lite");
 
 llm = ChatGroq(
-    model="openai/gpt-oss-120b", 
+    model="openai/gpt-oss-120b",
     temperature=0,
     max_tokens=2000,
     api_key=os.getenv("GROQ_API_KEY")   
