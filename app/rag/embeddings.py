@@ -8,6 +8,7 @@ def get_embeddings():
     if _embeddings is None:
         _embeddings = GoogleGenerativeAIEmbeddings(
             model="gemini-embedding-2-preview",
-            google_api_key=os.getenv("GOOGLE_API_KEY")
+            google_api_key=os.getenv("GOOGLE_API_KEY"),
+            output_dimensionality=768
         )
     return _embeddings
