@@ -16,7 +16,7 @@ def __ensure_index_exists ():
     if INDEX_NAME not in existing:
         pc.create_index(
             name=INDEX_NAME,
-            dimension=384,
+            dimension=768,
             metric="cosine",
             spec=ServerlessSpec(
                 cloud="aws",

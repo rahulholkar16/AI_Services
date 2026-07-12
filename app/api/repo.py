@@ -117,7 +117,7 @@ async def get_repo_tree(request: TreeRequest):
                     continue
             paths.append(path)
 
-        file_tree = _build_file_tree(paths[:400])  # safety cap for huge repos
+        file_tree = _build_file_tree(paths[:400])
 
         return {"repo_full_name": repo_full_name, "tree": file_tree}
     except HTTPException:

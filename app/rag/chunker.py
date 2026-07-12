@@ -2,7 +2,7 @@ import requests
 import base64
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.documents import Document
-from app.tools.files_tool import get_default_branch, HEADERS  # ✅ Reuse HEADERS bhi
+from app.tools.files_tool import get_default_branch, HEADERS
 
 IGNORE_DIRS = {
     ".git", "node_modules", ".next", "dist",
@@ -22,7 +22,7 @@ MAX_FILE_SIZE = 50000
 def get_repo_files(repo_full_name: str) -> list[str]:
     branch = get_default_branch(repo_full_name)
     url = f"https://api.github.com/repos/{repo_full_name}/git/trees/{branch}?recursive=1"  # ✅ /HEAD hataya
-    res = requests.get(url, headers=HEADERS)  # ✅ Token wala HEADERS use ho raha
+    res = requests.get(url, headers=HEADERS) 
 
     if not res.ok:
         raise ValueError(f"Failed to fetch tree: {res.status_code}")
