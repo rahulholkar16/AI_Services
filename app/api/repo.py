@@ -32,14 +32,25 @@ async def index_repo(request: IndexRequest):
             raise HTTPException(status_code=500, detail="Failed to chunk documents.")
 
         vector_store = get_vector_store()
-        batch_size = 20 
+        batch_size = 5
         total = len(chunks)
 
         for i in range(0, total, batch_size):
             batch = chunks[i:i + batch_size]
-            vector_store.add_documents(batch)
+
+            for attempt in range(3):
+                try:
+                    vector_store.add_documents(batch)
+                    break
+                except Exception as e:
+                    if "RESOURCE_EXHAUSTED" in str(e) and attempt < 2:
+                        print(f"Rate limited on batch {i}-{i+batch_size}, retrying in 15s (attempt {attempt + 1}/3)")
+                        time.sleep(15)
+                    else:
+                        raise
+
             print(f"Indexed {min(i + batch_size, total)}/{total} chunks")
-            time.sleep(4);  
+            time.sleep(6)
 
         return {
             "message": f"Indexed {len(chunks)} chunks from {repo_full_name}.",
