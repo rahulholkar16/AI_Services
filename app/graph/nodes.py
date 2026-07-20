@@ -75,6 +75,7 @@ def compact_message(state: State) -> dict:
 
     token_count = count_tokens(non_system)
     if token_count < SOFT_TRIGGER_TOKENS:
+        print("\n\nTOKEN COUNT:: ", token_count, "\n\n")
         return {}
 
     keep_n = 2 if token_count >= HARD_TRIGGER_TOKENS else KEEP_RAW_TURNS
