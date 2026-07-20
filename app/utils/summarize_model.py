@@ -5,10 +5,10 @@ from langchain.chat_models import init_chat_model;
 
 load_dotenv();
 
-def summarize_with_cheap_model(messages: list[BaseMessage]) -> str:
+def summarize_model(messages: list[BaseMessage]) -> str:
     
     cheap_llm = init_chat_model(
-        model="gemini-2.5-flash-lite",
+        model="gemini-3.1-flash-lite",
         model_provider="google_genai",
         temperature=0,
         max_tokens=800,
