@@ -23,40 +23,80 @@ class TreeRequest(BaseModel):
 async def index_repo(request: IndexRequest):
     try:
         repo_full_name = extract_full_name(request.repo_url)
-        docs = load_repo_documents(repo_full_name)
-        if not docs:
-            raise HTTPException(status_code=404, detail="No documents found in the repository.")
-
-        chunks = chunk_documents(docs)
-        if not chunks:
-            raise HTTPException(status_code=500, detail="Failed to chunk documents.")
 
         vector_store = get_vector_store()
-        batch_size = 20 
+        index = vector_store._index
+
+        # Check if namespace already exists
+        stats = index.describe_index_stats()
+
+        if repo_full_name in stats.get("namespaces", {}):
+            
+            return {
+                "message": "Repository already indexed.",
+                "repo_full_name": repo_full_name,
+                "already_indexed": True,
+            }
+
+        docs = load_repo_documents(repo_full_name)
+
+        if not docs:
+            raise HTTPException(
+                status_code=404,
+                detail="No documents found in the repository."
+            )
+
+        chunks = chunk_documents(docs)
+
+        if not chunks:
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to chunk documents."
+            )
+
+        batch_size = 5
         total = len(chunks)
 
         for i in range(0, total, batch_size):
             batch = chunks[i:i + batch_size]
-            vector_store.add_documents(batch)
+
+            for attempt in range(3):
+                try:
+                    vector_store.add_documents(
+                        documents=batch,
+                        namespace=repo_full_name,
+                    )
+                    break
+
+                except Exception as e:
+                    if "RESOURCE_EXHAUSTED" in str(e) and attempt < 2:
+                        print(
+                            f"Rate limited on batch "
+                            f"{i}-{min(i + batch_size, total)}. "
+                            f"Retrying in 15 seconds..."
+                        )
+                        time.sleep(15)
+                    else:
+                        raise
+
             print(f"Indexed {min(i + batch_size, total)}/{total} chunks")
-            time.sleep(4);  
+            time.sleep(6)
 
         return {
-            "message": f"Indexed {len(chunks)} chunks from {repo_full_name}.",
+            "message": f"Indexed {total} chunks from {repo_full_name}.",
             "repo_full_name": repo_full_name,
+            "already_indexed": False,
             "total_chunks": total,
         }
+
     except HTTPException:
         raise
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
 def _build_file_tree(paths: list[str]) -> list[dict]:
-    """
-    Convert a flat list of GitHub file paths (e.g. 'app/api/agent.py')
-    into a nested tree structure matching the frontend's FileNode shape:
-      { name, type: 'dir' | 'file', ext?, children? }
-    """
     root: dict = {}
 
     for path in paths:
@@ -66,6 +106,8 @@ def _build_file_tree(paths: list[str]) -> list[dict]:
             is_file = i == len(parts) - 1
             if part not in node:
                 node[part] = {"__meta__": {"is_file": is_file}, "__children__": {}}
+            elif is_file:
+                node[part]["__meta__"]["is_file"] = True
             node = node[part]["__children__"]
 
     def to_list(children: dict) -> list[dict]:
@@ -81,12 +123,10 @@ def _build_file_tree(paths: list[str]) -> list[dict]:
                     "type": "dir",
                     "children": to_list(value["__children__"]),
                 })
-        # Folders first, then files, both alphabetical
         items.sort(key=lambda n: (n["type"] != "dir", n["name"].lower()))
         return items
 
     return to_list(root)
-
 
 @router.post("/tree")
 async def get_repo_tree(request: TreeRequest):
@@ -111,6 +151,8 @@ async def get_repo_tree(request: TreeRequest):
             path = item["path"]
             if any(part in IGNORE_DIRS for part in path.split("/")):
                 continue
+            if item["type"] != "blob":
+                continue
             if item["type"] == "blob":
                 ext = "." + path.split(".")[-1].lower() if "." in path else ""
                 if ext not in ALLOW_EXTENSIONS:
@@ -118,7 +160,6 @@ async def get_repo_tree(request: TreeRequest):
             paths.append(path)
 
         file_tree = _build_file_tree(paths[:400])
-
         return {"repo_full_name": repo_full_name, "tree": file_tree}
     except HTTPException:
         raise

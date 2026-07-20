@@ -12,13 +12,30 @@ class AgentRequest(BaseModel):
 
 router = APIRouter();
 
+def extract_text(content):
+    # Groq/OpenAI
+    if isinstance(content, str):
+        return content
+    
+    # Gemini
+    if isinstance(content, list):
+        text_parts = []
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "text":
+                text_parts.append(block["text"])
+            elif isinstance(block, str):
+                text_parts.append(block)
+        return "\n".join(text_parts)
+    
+    return str(content)
+
 @router.post("/agent/chat")
 async def agent_chat(request: AgentRequest):
     try:
         repo_full_name = extract_full_name(request.repo_url)
 
         config = {"configurable": {"thread_id": request.thread_id}}
-
+        print("Thread ID:: ", request.thread_id);
         response = await state.agent.ainvoke(
             {
                 "messages": [HumanMessage(content=request.question)],
@@ -31,8 +48,9 @@ async def agent_chat(request: AgentRequest):
             config=config
         )
 
-        answer = response["messages"][-1].content
+        answer = extract_text(response["messages"][-1].content)
 
+        print("Answer:: ", answer)
         return {
             "answer": answer,
             "thread_id": request.thread_id
