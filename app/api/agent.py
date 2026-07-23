@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException;
+from fastapi import APIRouter
 from sse_starlette.sse import EventSourceResponse, ServerSentEvent
 from pydantic import BaseModel;
 from langchain_core.messages import HumanMessage;
@@ -74,7 +74,7 @@ async def agent_chat(request: AgentRequest):
                 "event": "done",
                 "data": "completed",
             }
-            
+
         except Exception as e:
             yield ServerSentEvent(
                 event="error",
