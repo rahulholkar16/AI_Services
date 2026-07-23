@@ -1,4 +1,5 @@
 from fastapi import APIRouter, HTTPException;
+from sse_starlette.sse import EventSourceResponse, ServerSentEvent
 from pydantic import BaseModel;
 from langchain_core.messages import HumanMessage;
 from app.utils.Repo_Full_Name_Extracter import extract_full_name;
@@ -31,30 +32,59 @@ def extract_text(content):
 
 @router.post("/agent/chat")
 async def agent_chat(request: AgentRequest):
-    try:
-        repo_full_name = extract_full_name(request.repo_url)
 
-        config = {"configurable": {"thread_id": request.thread_id}}
-        print("Thread ID:: ", request.thread_id);
-        response = await state.agent.ainvoke(
-            {
-                "messages": [HumanMessage(content=request.question)],
-                "repo_url": request.repo_url,
-                "repo_full_name": repo_full_name,
-                "repo_id": request.repo_id,
-                "thread_id": request.thread_id,
-                "pr_pending": None,
-            },
-            config=config
-        )
+    async def event_generator ():
+        try:
+            repo_full_name = extract_full_name(request.repo_url)
 
-        answer = extract_text(response["messages"][-1].content)
+            config = {"configurable": {"thread_id": request.thread_id}}
+            print("Thread ID:: ", request.thread_id);
 
-        print("Answer:: ", answer)
-        return {
-            "answer": answer,
-            "thread_id": request.thread_id
+            async for chunk in state.agent.astream(
+                {
+                    "messages": [HumanMessage(content=request.question)],
+                    "repo_url": request.repo_url,
+                    "repo_full_name": repo_full_name,
+                    "repo_id": request.repo_id,
+                    "thread_id": request.thread_id,
+                    "pr_pending": None,
+                },
+                config=config
+            ):
+                    print("\nCHUNK:: ", chunk)
+                    for _, node_data in chunk.items():
+                        if not node_data:
+                            continue
+
+                        messages = node_data.get("messages")
+                        if not messages:
+                            continue
+
+                        last_message = messages[-1]
+
+                        text = extract_text(last_message.content)
+
+                        if text:
+                            yield {
+                                "event": "message",
+                                "data": text,
+                            }
+
+            yield {
+                "event": "done",
+                "data": "completed",
+            }
+            
+        except Exception as e:
+            yield ServerSentEvent(
+                event="error",
+                data=str(e)
+            )
+        
+    return EventSourceResponse(
+        event_generator(),
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
         }
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    )
