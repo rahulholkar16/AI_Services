@@ -1,7 +1,7 @@
 from fastapi import APIRouter
 from sse_starlette.sse import EventSourceResponse, ServerSentEvent
 from pydantic import BaseModel;
-from langchain_core.messages import HumanMessage;
+from langchain_core.messages import HumanMessage, AIMessage, ToolMessage;
 from app.utils.Repo_Full_Name_Extracter import extract_full_name;
 import app.state as state
 
@@ -51,7 +51,6 @@ async def agent_chat(request: AgentRequest):
                 },
                 config=config
             ):
-                    print("\nCHUNK:: ", chunk)
                     for _, node_data in chunk.items():
                         if not node_data:
                             continue
@@ -60,15 +59,31 @@ async def agent_chat(request: AgentRequest):
                         if not messages:
                             continue
 
-                        last_message = messages[-1]
+                        for msg in messages:
 
-                        text = extract_text(last_message.content)
+                            if isinstance(msg, ToolMessage):
+                                print("\nTOOL_RESULT:: ", msg.name)
+                                yield {
+                                    "event": "tool_result",
+                                    "data": msg.name or "tool",
+                                }
+                                continue
 
-                        if text:
-                            yield {
-                                "event": "message",
-                                "data": text,
-                            }
+                            if isinstance(msg, AIMessage) and msg.tool_calls:
+                                for tc in msg.tool_calls:
+                                    print("\nTOOL_CALL:: ", tc["name"])
+                                    yield {
+                                        "event": "tool_call",
+                                        "data": tc["name"],
+                                    }
+                                continue
+                            text = extract_text(msg.content)
+                            print("\nCHUNK:: ", text)
+                            if text:
+                                yield {
+                                    "event": "message",
+                                    "data": text,
+                                }
 
             yield {
                 "event": "done",
