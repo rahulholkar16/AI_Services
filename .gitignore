@@ -13,3 +13,5 @@ chroma_db/
 
 # Python cache
 *.pyc
+
+test
