@@ -2,7 +2,9 @@ from fastapi import APIRouter
 from sse_starlette.sse import EventSourceResponse, ServerSentEvent
 from pydantic import BaseModel;
 from langchain_core.messages import HumanMessage, AIMessage, ToolMessage;
+import asyncio;
 from app.utils.Repo_Full_Name_Extracter import extract_full_name;
+from app.utils.message_store import get_or_create_session_id, save_message, generate_and_save_title;
 import app.state as state
 
 class AgentRequest(BaseModel):
@@ -34,11 +36,19 @@ def extract_text(content):
 async def agent_chat(request: AgentRequest):
 
     async def event_generator ():
+        session_id = None
+        assistant_text_parts = []
+
         try:
             repo_full_name = extract_full_name(request.repo_url)
 
             config = {"configurable": {"thread_id": request.thread_id}}
             print("Thread ID:: ", request.thread_id);
+
+            session_id = await get_or_create_session_id(request.thread_id, request.repo_id, request.question)
+            if session_id:
+                await save_message(session_id, "user", request.question)
+                asyncio.create_task(generate_and_save_title(session_id, request.question))
 
             async for chunk in state.agent.astream(
                 {
@@ -63,6 +73,13 @@ async def agent_chat(request: AgentRequest):
 
                             if isinstance(msg, ToolMessage):
                                 print("\nTOOL_RESULT:: ", msg.name)
+                                if session_id:
+                                    await save_message(
+                                        session_id,
+                                        "tool",
+                                        extract_text(msg.content) or (msg.name or "tool"),
+                                        tool_calls=[{"name": msg.name, "type": "tool_result"}],
+                                    )
                                 yield {
                                     "event": "tool_result",
                                     "data": msg.name or "tool",
@@ -72,6 +89,13 @@ async def agent_chat(request: AgentRequest):
                             if isinstance(msg, AIMessage) and msg.tool_calls:
                                 for tc in msg.tool_calls:
                                     print("\nTOOL_CALL:: ", tc["name"])
+                                    if session_id:
+                                        await save_message(
+                                            session_id,
+                                            "tool",
+                                            tc["name"],
+                                            tool_calls=[{"name": tc["name"], "args": tc.get("args"), "type": "tool_call"}],
+                                        )
                                     yield {
                                         "event": "tool_call",
                                         "data": tc["name"],
@@ -80,10 +104,14 @@ async def agent_chat(request: AgentRequest):
                             text = extract_text(msg.content)
                             print("\nCHUNK:: ", text)
                             if text:
+                                assistant_text_parts.append(text)
                                 yield {
                                     "event": "message",
                                     "data": text,
                                 }
+
+            if session_id and assistant_text_parts:
+                await save_message(session_id, "assistant", "\n".join(assistant_text_parts))
 
             yield {
                 "event": "done",
@@ -91,6 +119,8 @@ async def agent_chat(request: AgentRequest):
             }
 
         except Exception as e:
+            if session_id and assistant_text_parts:
+                await save_message(session_id, "assistant", "\n".join(assistant_text_parts))
             yield ServerSentEvent(
                 event="error",
                 data=str(e)
