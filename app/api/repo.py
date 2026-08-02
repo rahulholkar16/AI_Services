@@ -166,7 +166,6 @@ async def get_repo_tree(request: TreeRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-
 @router.post("/info")
 async def get_repo_info(request: TreeRequest):
     """
