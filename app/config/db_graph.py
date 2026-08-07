@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager;
 from psycopg_pool import AsyncConnectionPool;
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver;
 from app.graph import build_graph;
+from .db_store import init_store;
 import app.state as state
 
 DATABASE_URL = os.getenv("CHECKPOINT_DATABASE_URL", "")
@@ -22,9 +23,15 @@ async def init_agent():
         max_size=10,
         kwargs=connection_kwargs,
     ) as pool:
+        
         checkpointer = AsyncPostgresSaver(pool)
         await checkpointer.setup();
-        state.agent = await build_graph(checkpointer);
+
+        store = await init_store(pool);
+        await store.setup();
+        state.store = store;
+
+        state.agent = await build_graph(checkpointer, store);
         print("✅ Agent ready with Postgres memory (pooled)!");
         yield
     print("Agent connection closed.");
