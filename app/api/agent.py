@@ -1,7 +1,7 @@
 from fastapi import APIRouter
 from sse_starlette.sse import EventSourceResponse, ServerSentEvent
 from pydantic import BaseModel;
-from langchain_core.messages import HumanMessage, AIMessage, ToolMessage;
+from langchain_core.messages import HumanMessage, AIMessage, ToolMessage, SystemMessage;
 import asyncio;
 from app.utils.Repo_Full_Name_Extracter import extract_full_name;
 from app.utils.message_store import get_or_create_session_id, save_message, generate_and_save_title;
@@ -12,6 +12,7 @@ class AgentRequest(BaseModel):
     question:  str
     thread_id: str
     repo_id:   str
+    user_id:   str
 
 router = APIRouter();
 
@@ -50,17 +51,39 @@ async def agent_chat(request: AgentRequest):
                 await save_message(session_id, "user", request.question)
                 asyncio.create_task(generate_and_save_title(session_id, request.question))
 
-            async for chunk in state.agent.astream(
+            async for stream_mode, chunk in state.agent.astream(
                 {
                     "messages": [HumanMessage(content=request.question)],
                     "repo_url": request.repo_url,
                     "repo_full_name": repo_full_name,
                     "repo_id": request.repo_id,
+                    "user_id": request.user_id,
                     "thread_id": request.thread_id,
                     "pr_pending": None,
                 },
-                config=config
+                config=config,
+                stream_mode=["updates", "messages"],
             ):
+                    if stream_mode == "messages":
+                        msg_chunk, metadata = chunk
+                        node_name = (metadata or {}).get("langgraph_node")
+                        
+                        if node_name != "planner":
+                            continue
+                        if isinstance(msg_chunk, ToolMessage):
+                            continue
+                        if getattr(msg_chunk, "tool_calls", None) or getattr(msg_chunk, "tool_call_chunks", None):
+                            continue
+                        token_text = extract_text(msg_chunk.content)
+                        if token_text:
+                            print("TOKEN:: ", repr(token_text), "| raw content:", repr(msg_chunk.content))
+                            assistant_text_parts.append(token_text)
+                            yield {
+                                "event": "message",
+                                "data": token_text,
+                            }
+                        continue
+
                     for _, node_data in chunk.items():
                         if not node_data:
                             continue
@@ -70,6 +93,9 @@ async def agent_chat(request: AgentRequest):
                             continue
 
                         for msg in messages:
+
+                            if isinstance(msg, SystemMessage):
+                                continue
 
                             if isinstance(msg, ToolMessage):
                                 print("\nTOOL_RESULT:: ", msg.name)
@@ -101,14 +127,6 @@ async def agent_chat(request: AgentRequest):
                                         "data": tc["name"],
                                     }
                                 continue
-                            text = extract_text(msg.content)
-                            print("\nCHUNK:: ", text)
-                            if text:
-                                assistant_text_parts.append(text)
-                                yield {
-                                    "event": "message",
-                                    "data": text,
-                                }
 
             if session_id and assistant_text_parts:
                 await save_message(session_id, "assistant", "\n".join(assistant_text_parts))

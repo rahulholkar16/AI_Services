@@ -14,6 +14,7 @@ router = APIRouter(
 
 class IndexRequest(BaseModel):
     repo_url: str;
+    force: bool = False;
 
 class TreeRequest(BaseModel):
     repo_url: str;
@@ -29,14 +30,18 @@ async def index_repo(request: IndexRequest):
 
         # Check if namespace already exists
         stats = index.describe_index_stats()
+        already_indexed = repo_full_name in stats.get("namespaces", {})
 
-        if repo_full_name in stats.get("namespaces", {}):
-            
+        if already_indexed and not request.force:
             return {
                 "message": "Repository already indexed.",
                 "repo_full_name": repo_full_name,
                 "already_indexed": True,
             }
+
+        if already_indexed and request.force:
+            index.delete(delete_all=True, namespace=repo_full_name)
+            print(f"Cleared stale index for {repo_full_name}, re-indexing...")
 
         docs = load_repo_documents(repo_full_name)
 
@@ -60,7 +65,7 @@ async def index_repo(request: IndexRequest):
         for i in range(0, total, batch_size):
             batch = chunks[i:i + batch_size]
 
-            for attempt in range(3):
+            for attempt in range(4):
                 try:
                     vector_store.add_documents(
                         documents=batch,
@@ -69,19 +74,19 @@ async def index_repo(request: IndexRequest):
                     break
 
                 except Exception as e:
-                    if "RESOURCE_EXHAUSTED" in str(e) and attempt < 2:
+                    if "RESOURCE_EXHAUSTED" in str(e) and attempt < 3:
+                        wait = 15 * (attempt + 1)
                         print(
                             f"Rate limited on batch "
                             f"{i}-{min(i + batch_size, total)}. "
-                            f"Retrying in 15 seconds..."
+                            f"Retrying in {wait} seconds..."
                         )
-                        time.sleep(15)
+                        time.sleep(wait)
                     else:
                         raise
 
             print(f"Indexed {min(i + batch_size, total)}/{total} chunks")
             time.sleep(6)
-
         return {
             "message": f"Indexed {total} chunks from {repo_full_name}.",
             "repo_full_name": repo_full_name,

@@ -1,4 +1,5 @@
 import json
+import os
 from typing import Optional
 
 from sqlalchemy import text
@@ -96,7 +97,9 @@ async def generate_and_save_title(session_id: str, question: str) -> None:
             if current_title not in _DEFAULT_TITLES:
                 return
 
-        from app.llm import llm
+        from app.utils.cheap_llm import get_cheap_llm
+
+        cheap_llm = get_cheap_llm(max_tokens=50)
         prompt = (
             "Summarize the following user question into a short chat title "
             "of 3 to 6 words. Plain text only \u2014 no quotes, no markdown, "
@@ -104,7 +107,7 @@ async def generate_and_save_title(session_id: str, question: str) -> None:
             f"Question: {question.strip()[:500]}"
         )
 
-        response = await llm.ainvoke(prompt)
+        response = await cheap_llm.ainvoke(prompt)
         raw_title = response.content if hasattr(response, "content") else str(response)
         if isinstance(raw_title, list):
             raw_title = " ".join(

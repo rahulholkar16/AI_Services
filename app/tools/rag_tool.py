@@ -18,7 +18,7 @@ def search_codebase (repo_full_name: str, query: str) -> str:
     """
     try:
         store = get_vector_store();
-        results = store.similarity_search(query, k=5, filter={"repo_full_name": repo_full_name});
+        results = store.similarity_search_with_score(query, k=5, filter={"repo_full_name": repo_full_name});
 
         if not results:
             return f"No relevant code found for: {query}";
