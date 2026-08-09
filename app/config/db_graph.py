@@ -21,7 +21,9 @@ async def init_agent():
     async with AsyncConnectionPool(
         conninfo=DATABASE_URL,
         max_size=10,
+        min_size=1,
         kwargs=connection_kwargs,
+        check=AsyncConnectionPool.check_connection,
     ) as pool:
         
         checkpointer = AsyncPostgresSaver(pool)

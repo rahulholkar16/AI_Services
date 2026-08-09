@@ -10,7 +10,6 @@ from app.utils.summarize_model import summarize_model;
 from app.utils.cheap_llm import get_cheap_llm;
 import uuid;
 import asyncio;
-import os;
 
 tools = [
     search_codebase,
@@ -141,12 +140,16 @@ async def retrieve_memory(state: State, *, store) -> dict:
             last_user_text = m.content
             break
 
-    facts = await store.asearch(_memory_namespace(repo_id, user_id, "facts"), limit=20)
-    episodes = await store.asearch(
-        _memory_namespace(repo_id, user_id, "episodes"),
-        query=last_user_text,
-        limit=5,
-    )
+    try:
+        facts = await store.asearch(_memory_namespace(repo_id, user_id, "facts"), limit=20)
+        episodes = await store.asearch(
+            _memory_namespace(repo_id, user_id, "episodes"),
+            query=last_user_text,
+            limit=5,
+        )
+    except Exception as e:
+        print(f"Retrieve_memory failed, continuing without memory: {e!r}")
+        return {}
 
     if not facts and not episodes:
         return {}
@@ -207,13 +210,16 @@ async def _extract_fact(question: str, answer: str) -> str | None:
 
 
 async def _extract_and_save_fact(question, answer, repo_id, user_id, store):
-    fact = await _extract_fact(question, answer)
-    if fact:
-        await store.aput(
-            _memory_namespace(repo_id, user_id, "facts"),
-            str(uuid.uuid4()),
-            {"content": fact},
-        )
+    try:
+        fact = await _extract_fact(question, answer)
+        if fact:
+            await store.aput(
+                _memory_namespace(repo_id, user_id, "facts"),
+                str(uuid.uuid4()),
+                {"content": fact},
+            )
+    except Exception as e:
+            print(f"Fact extraction/save failed: {e!r}")
 
 async def write_memory(state: State, *, store) -> dict:
     repo_id = state.get("repo_id", "")
@@ -226,12 +232,26 @@ async def write_memory(state: State, *, store) -> dict:
 
     if last_user and last_ai:
         episode_content = f"Q: {_content_to_text(last_user.content)}\nA: {_content_to_text(last_ai.content)}"
-        await store.aput(
-            _memory_namespace(repo_id, user_id, "episodes"),
-            str(uuid.uuid4()),
-            {"content": episode_content},
-        )
+        try:
+            await store.aput(
+                _memory_namespace(repo_id, user_id, "episodes"),
+                str(uuid.uuid4()),
+                {"content": episode_content},
+            )
+        except Exception as e:
+            print(f"Failed to save episode, skipping: {e!r}")
 
-        asyncio.create_task(_extract_and_save_fact(last_user.content, last_ai.content, repo_id, user_id, store))
+        task = asyncio.create_task(
+            _extract_and_save_fact(last_user.content, last_ai.content, repo_id, user_id, store)
+        )
+        task.add_done_callback(_log_task_exception)
 
     return {}
+
+
+def _log_task_exception(task: asyncio.Task):
+    if task.cancelled():
+        return
+    exc = task.exception()
+    if exc:
+        print(f"Background fact-extraction task failed: {exc!r}")
