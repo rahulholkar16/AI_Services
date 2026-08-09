@@ -1,10 +1,11 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from sse_starlette.sse import EventSourceResponse, ServerSentEvent
 from pydantic import BaseModel;
 from langchain_core.messages import HumanMessage, AIMessage, ToolMessage, SystemMessage;
 import asyncio;
 from app.utils.Repo_Full_Name_Extracter import extract_full_name;
 from app.utils.message_store import get_or_create_session_id, save_message, generate_and_save_title;
+from app.middleware.rate_limit import limiter
 import app.state as state
 
 class AgentRequest(BaseModel):
@@ -12,7 +13,6 @@ class AgentRequest(BaseModel):
     question:  str
     thread_id: str
     repo_id:   str
-    user_id:   str
 
 router = APIRouter();
 
@@ -34,31 +34,33 @@ def extract_text(content):
     return str(content)
 
 @router.post("/agent/chat")
-async def agent_chat(request: AgentRequest):
+@limiter.limit("10/minute")
+async def agent_chat(request: Request, body: AgentRequest):
+    user_id = request.state.user_id
 
     async def event_generator ():
         session_id = None
         assistant_text_parts = []
 
         try:
-            repo_full_name = extract_full_name(request.repo_url)
+            repo_full_name = extract_full_name(body.repo_url)
 
-            config = {"configurable": {"thread_id": request.thread_id}}
-            print("Thread ID:: ", request.thread_id);
+            config = {"configurable": {"thread_id": body.thread_id}}
+            print("Thread ID:: ", body.thread_id);
 
-            session_id = await get_or_create_session_id(request.thread_id, request.repo_id, request.question)
+            session_id = await get_or_create_session_id(body.thread_id, body.repo_id, body.question)
             if session_id:
-                await save_message(session_id, "user", request.question)
-                asyncio.create_task(generate_and_save_title(session_id, request.question))
+                await save_message(session_id, "user", body.question)
+                asyncio.create_task(generate_and_save_title(session_id, body.question))
 
             async for stream_mode, chunk in state.agent.astream(
                 {
-                    "messages": [HumanMessage(content=request.question)],
-                    "repo_url": request.repo_url,
+                    "messages": [HumanMessage(content=body.question)],
+                    "repo_url": body.repo_url,
                     "repo_full_name": repo_full_name,
-                    "repo_id": request.repo_id,
-                    "user_id": request.user_id,
-                    "thread_id": request.thread_id,
+                    "repo_id": body.repo_id,
+                    "user_id": user_id,
+                    "thread_id": body.thread_id,
                     "pr_pending": None,
                 },
                 config=config,

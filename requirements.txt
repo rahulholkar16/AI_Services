@@ -26,3 +26,6 @@ requests
 
 # Utilities
 pydantic
+pyjwt[crypto]
+slowapi
+redis

@@ -1,10 +1,11 @@
 import requests;
 import time;
-from fastapi import APIRouter, HTTPException;
+from fastapi import APIRouter, HTTPException, Request;
 from pydantic import BaseModel;
 from app.rag import get_vector_store, load_repo_documents, chunk_documents;
 from app.utils.Repo_Full_Name_Extracter import extract_full_name;
 from app.tools.files_tool import HEADERS, get_default_branch, IGNORE_DIRS, ALLOW_EXTENSIONS;
+from app.middleware.rate_limit import limiter
 
 router = APIRouter(
     prefix="/api/repo",
@@ -21,9 +22,10 @@ class TreeRequest(BaseModel):
 
 
 @router.post("/index")
-async def index_repo(request: IndexRequest):
+@limiter.limit("10/hour")
+async def index_repo(request: Request, body: IndexRequest):
     try:
-        repo_full_name = extract_full_name(request.repo_url)
+        repo_full_name = extract_full_name(body.repo_url)
 
         vector_store = get_vector_store()
         index = vector_store._index
@@ -32,14 +34,14 @@ async def index_repo(request: IndexRequest):
         stats = index.describe_index_stats()
         already_indexed = repo_full_name in stats.get("namespaces", {})
 
-        if already_indexed and not request.force:
+        if already_indexed and not body.force:
             return {
                 "message": "Repository already indexed.",
                 "repo_full_name": repo_full_name,
                 "already_indexed": True,
             }
 
-        if already_indexed and request.force:
+        if already_indexed and body.force:
             index.delete(delete_all=True, namespace=repo_full_name)
             print(f"Cleared stale index for {repo_full_name}, re-indexing...")
 
