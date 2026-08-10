@@ -33,8 +33,7 @@ class AuthMiddleware (BaseHTTPMiddleware):
             user_id = _verify_token(token)
         except jwt.ExpiredSignatureError:
             return JSONResponse(status_code=401, content={"detail": "Token expired"})
-        except Exception as e:
-            print("TOKEN VERIFY FAILED:", repr(e))
+        except Exception:
             return JSONResponse(status_code=401, content={"detail": "Invalid token"})
 
         request.state.user_id = user_id
