@@ -1,8 +1,11 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from sse_starlette.sse import EventSourceResponse, ServerSentEvent
 from pydantic import BaseModel;
-from langchain_core.messages import HumanMessage, AIMessage, ToolMessage;
+from langchain_core.messages import HumanMessage, AIMessage, ToolMessage, SystemMessage;
+import asyncio;
 from app.utils.Repo_Full_Name_Extracter import extract_full_name;
+from app.utils.message_store import get_or_create_session_id, save_message, generate_and_save_title;
+from app.middleware.rate_limit import limiter
 import app.state as state
 
 class AgentRequest(BaseModel):
@@ -31,26 +34,58 @@ def extract_text(content):
     return str(content)
 
 @router.post("/agent/chat")
-async def agent_chat(request: AgentRequest):
+@limiter.limit("10/minute")
+async def agent_chat(request: Request, body: AgentRequest):
+    user_id = request.state.user_id
 
     async def event_generator ():
+        session_id = None
+        assistant_text_parts = []
+
         try:
-            repo_full_name = extract_full_name(request.repo_url)
+            repo_full_name = extract_full_name(body.repo_url)
 
-            config = {"configurable": {"thread_id": request.thread_id}}
-            print("Thread ID:: ", request.thread_id);
+            config = {"configurable": {"thread_id": body.thread_id}}
+            print("Thread ID:: ", body.thread_id);
 
-            async for chunk in state.agent.astream(
+            session_id = await get_or_create_session_id(body.thread_id, body.repo_id, body.question)
+            if session_id:
+                await save_message(session_id, "user", body.question)
+                asyncio.create_task(generate_and_save_title(session_id, body.question))
+
+            async for stream_mode, chunk in state.agent.astream(
                 {
-                    "messages": [HumanMessage(content=request.question)],
-                    "repo_url": request.repo_url,
+                    "messages": [HumanMessage(content=body.question)],
+                    "repo_url": body.repo_url,
                     "repo_full_name": repo_full_name,
-                    "repo_id": request.repo_id,
-                    "thread_id": request.thread_id,
+                    "repo_id": body.repo_id,
+                    "user_id": user_id,
+                    "thread_id": body.thread_id,
                     "pr_pending": None,
                 },
-                config=config
+                config=config,
+                stream_mode=["updates", "messages"],
             ):
+                    if stream_mode == "messages":
+                        msg_chunk, metadata = chunk
+                        node_name = (metadata or {}).get("langgraph_node")
+                        
+                        if node_name != "planner":
+                            continue
+                        if isinstance(msg_chunk, ToolMessage):
+                            continue
+                        if getattr(msg_chunk, "tool_calls", None) or getattr(msg_chunk, "tool_call_chunks", None):
+                            continue
+                        token_text = extract_text(msg_chunk.content)
+                        if token_text:
+                            print("TOKEN:: ", repr(token_text), "| raw content:", repr(msg_chunk.content))
+                            assistant_text_parts.append(token_text)
+                            yield {
+                                "event": "message",
+                                "data": token_text,
+                            }
+                        continue
+
                     for _, node_data in chunk.items():
                         if not node_data:
                             continue
@@ -61,8 +96,18 @@ async def agent_chat(request: AgentRequest):
 
                         for msg in messages:
 
+                            if isinstance(msg, SystemMessage):
+                                continue
+
                             if isinstance(msg, ToolMessage):
                                 print("\nTOOL_RESULT:: ", msg.name)
+                                if session_id:
+                                    await save_message(
+                                        session_id,
+                                        "tool",
+                                        extract_text(msg.content) or (msg.name or "tool"),
+                                        tool_calls=[{"name": msg.name, "type": "tool_result"}],
+                                    )
                                 yield {
                                     "event": "tool_result",
                                     "data": msg.name or "tool",
@@ -72,18 +117,21 @@ async def agent_chat(request: AgentRequest):
                             if isinstance(msg, AIMessage) and msg.tool_calls:
                                 for tc in msg.tool_calls:
                                     print("\nTOOL_CALL:: ", tc["name"])
+                                    if session_id:
+                                        await save_message(
+                                            session_id,
+                                            "tool",
+                                            tc["name"],
+                                            tool_calls=[{"name": tc["name"], "args": tc.get("args"), "type": "tool_call"}],
+                                        )
                                     yield {
                                         "event": "tool_call",
                                         "data": tc["name"],
                                     }
                                 continue
-                            text = extract_text(msg.content)
-                            print("\nCHUNK:: ", text)
-                            if text:
-                                yield {
-                                    "event": "message",
-                                    "data": text,
-                                }
+
+            if session_id and assistant_text_parts:
+                await save_message(session_id, "assistant", "\n".join(assistant_text_parts))
 
             yield {
                 "event": "done",
@@ -91,6 +139,8 @@ async def agent_chat(request: AgentRequest):
             }
 
         except Exception as e:
+            if session_id and assistant_text_parts:
+                await save_message(session_id, "assistant", "\n".join(assistant_text_parts))
             yield ServerSentEvent(
                 event="error",
                 data=str(e)

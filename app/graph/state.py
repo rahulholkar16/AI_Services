@@ -7,6 +7,7 @@ class State (TypedDict):
     repo_url: str
     repo_full_name: str
     repo_id: str
+    user_id: str
     thread_id: str
     pr_pending: dict | None
 

@@ -76,14 +76,13 @@ def list_directory(repo_full_name: str):
     except Exception as e:
         return f"Error listing directory: {str(e)}"
 
-
 @tool
 def read_file(repo_full_name: str, file_path: str):
     """
     Read a specific file from GitHub repo.
     Use for understanding implementation details.
     repo_full_name format: 'owner/repo'
-    file_path: 'src/auth.ts', 'app/page.tsx'
+    file_path: 'src/auth.ts', 'app/page.tsx',
     """
     try:
         url = f"https://api.github.com/repos/{repo_full_name}/contents/{file_path}"

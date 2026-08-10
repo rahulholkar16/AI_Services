@@ -1,10 +1,11 @@
 import requests;
 import time;
-from fastapi import APIRouter, HTTPException;
+from fastapi import APIRouter, HTTPException, Request;
 from pydantic import BaseModel;
 from app.rag import get_vector_store, load_repo_documents, chunk_documents;
 from app.utils.Repo_Full_Name_Extracter import extract_full_name;
 from app.tools.files_tool import HEADERS, get_default_branch, IGNORE_DIRS, ALLOW_EXTENSIONS;
+from app.middleware.rate_limit import limiter
 
 router = APIRouter(
     prefix="/api/repo",
@@ -14,29 +15,35 @@ router = APIRouter(
 
 class IndexRequest(BaseModel):
     repo_url: str;
+    force: bool = False;
 
 class TreeRequest(BaseModel):
     repo_url: str;
 
 
 @router.post("/index")
-async def index_repo(request: IndexRequest):
+@limiter.limit("10/hour")
+async def index_repo(request: Request, body: IndexRequest):
     try:
-        repo_full_name = extract_full_name(request.repo_url)
+        repo_full_name = extract_full_name(body.repo_url)
 
         vector_store = get_vector_store()
         index = vector_store._index
 
         # Check if namespace already exists
         stats = index.describe_index_stats()
+        already_indexed = repo_full_name in stats.get("namespaces", {})
 
-        if repo_full_name in stats.get("namespaces", {}):
-            
+        if already_indexed and not body.force:
             return {
                 "message": "Repository already indexed.",
                 "repo_full_name": repo_full_name,
                 "already_indexed": True,
             }
+
+        if already_indexed and body.force:
+            index.delete(delete_all=True, namespace=repo_full_name)
+            print(f"Cleared stale index for {repo_full_name}, re-indexing...")
 
         docs = load_repo_documents(repo_full_name)
 
@@ -60,7 +67,7 @@ async def index_repo(request: IndexRequest):
         for i in range(0, total, batch_size):
             batch = chunks[i:i + batch_size]
 
-            for attempt in range(3):
+            for attempt in range(4):
                 try:
                     vector_store.add_documents(
                         documents=batch,
@@ -69,19 +76,19 @@ async def index_repo(request: IndexRequest):
                     break
 
                 except Exception as e:
-                    if "RESOURCE_EXHAUSTED" in str(e) and attempt < 2:
+                    if "RESOURCE_EXHAUSTED" in str(e) and attempt < 3:
+                        wait = 15 * (attempt + 1)
                         print(
                             f"Rate limited on batch "
                             f"{i}-{min(i + batch_size, total)}. "
-                            f"Retrying in 15 seconds..."
+                            f"Retrying in {wait} seconds..."
                         )
-                        time.sleep(15)
+                        time.sleep(wait)
                     else:
                         raise
 
             print(f"Indexed {min(i + batch_size, total)}/{total} chunks")
             time.sleep(6)
-
         return {
             "message": f"Indexed {total} chunks from {repo_full_name}.",
             "repo_full_name": repo_full_name,
@@ -165,7 +172,6 @@ async def get_repo_tree(request: TreeRequest):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
 
 @router.post("/info")
 async def get_repo_info(request: TreeRequest):

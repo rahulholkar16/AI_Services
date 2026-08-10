@@ -53,7 +53,7 @@ def get_repo_files(repo_full_name: str) -> list[str]:
 
 def fetch_file_content(repo_full_name: str, file_path: str) -> str | None:
     url = f"https://api.github.com/repos/{repo_full_name}/contents/{file_path}"
-    res = requests.get(url, headers=HEADERS)  # ✅ Token wala HEADERS
+    res = requests.get(url, headers=HEADERS)
 
     if not res.ok:
         return None
