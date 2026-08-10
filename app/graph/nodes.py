@@ -5,9 +5,7 @@ from langchain_core.messages import (
     SystemMessage, AIMessage, ToolMessage, RemoveMessage
 )
 from langgraph.prebuilt import ToolNode;
-from app.utils.count_tokens import count_tokens;
-from app.utils.summarize_model import summarize_model;
-from app.utils.cheap_llm import get_cheap_llm;
+from app.utils import count_tokens, summarize_model, _save_fact, _memory_namespace, _content_to_text
 import uuid;
 import asyncio;
 
@@ -123,11 +121,6 @@ async def compact_message(state: State) -> dict:
     print("====SUMMARY_MSG==== \n", summary_msg.content)
     return {"messages": removal + [summary_msg]}
 
-
-def _memory_namespace(repo_id: str, user_id: str, kind: str) -> tuple:
-    return ("repo", repo_id, "user", user_id, kind)
-
-
 async def retrieve_memory(state: State, *, store) -> dict:
     repo_id = state.get("repo_id", "")
     user_id = state.get("user_id", "")
@@ -164,63 +157,6 @@ async def retrieve_memory(state: State, *, store) -> dict:
 
     return {"messages": [SystemMessage(content=f"[Long-term memory]:\n{memory_block}")]}
 
-
-FACT_EXTRACTOR_PROMPT = """You are filtering an AI coding assistant's answer for durable, \
-reusable facts about a GitHub repository — things like tech stack, frameworks, architecture, \
-database, deployment target, or key conventions that would still be true and useful in a \
-future, unrelated conversation about this repo.
-
-Question: {question}
-Answer: {answer}
-
-If the answer contains such a durable fact, reply with ONLY that fact, rewritten as one \
-concise, self-contained sentence (no "the answer says" framing).
-If it does NOT contain a durable, reusable fact (e.g. it's a one-off code explanation, a \
-specific line/function walkthrough, or advice that isn't really about this repo), reply with \
-exactly: NONE
-"""
-
-
-def _content_to_text(content) -> str:
-    """AIMessage.content string ya list-of-blocks (Gemini structured content)
-    dono ho sakta hai — dono ko plain string mein normalize karta hai."""
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        parts = []
-        for block in content:
-            if isinstance(block, str):
-                parts.append(block)
-            elif isinstance(block, dict):
-                parts.append(block.get("text", ""))
-        return "\n".join(p for p in parts if p)
-    return str(content) if content else ""
-
-
-async def _extract_fact(question: str, answer: str) -> str | None:
-    cheap_llm = get_cheap_llm(max_tokens=200)
-    prompt = FACT_EXTRACTOR_PROMPT.format(
-        question=_content_to_text(question), answer=_content_to_text(answer)
-    )
-    resp = await cheap_llm.ainvoke(prompt)
-    text = _content_to_text(resp.content).strip()
-    if not text or text == "NONE":
-        return None
-    return text
-
-
-async def _extract_and_save_fact(question, answer, repo_id, user_id, store):
-    try:
-        fact = await _extract_fact(question, answer)
-        if fact:
-            await store.aput(
-                _memory_namespace(repo_id, user_id, "facts"),
-                str(uuid.uuid4()),
-                {"content": fact},
-            )
-    except Exception as e:
-            print(f"Fact extraction/save failed: {e!r}")
-
 async def write_memory(state: State, *, store) -> dict:
     repo_id = state.get("repo_id", "")
     user_id = state.get("user_id", "")
@@ -242,7 +178,7 @@ async def write_memory(state: State, *, store) -> dict:
             print(f"Failed to save episode, skipping: {e!r}")
 
         task = asyncio.create_task(
-            _extract_and_save_fact(last_user.content, last_ai.content, repo_id, user_id, store)
+            _save_fact(last_user.content, last_ai.content, repo_id, user_id, store)
         )
         task.add_done_callback(_log_task_exception)
 
