@@ -1,8 +1,11 @@
 import requests
 import base64
+import logging
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.documents import Document
 from app.tools.files_tool import get_default_branch, HEADERS
+
+logger = logging.getLogger(__name__)
 
 IGNORE_DIRS = {
     ".git", "node_modules", ".next", "dist",
@@ -70,7 +73,7 @@ def load_repo_documents(repo_full_name: str) -> list[Document]:
     files = get_repo_files(repo_full_name)
     docs = []
 
-    print(f"Found {len(files)} files to index...")
+    logger.info("Found %s files to index...", len(files))
 
     for path in files:
         content = fetch_file_content(repo_full_name, path)
@@ -86,7 +89,7 @@ def load_repo_documents(repo_full_name: str) -> list[Document]:
             }
         ))
 
-    print(f"Loaded {len(docs)} documents")
+    logger.info("Loaded %s documents", len(docs))
     return docs
 
 
@@ -98,5 +101,5 @@ def chunk_documents(docs: list[Document]) -> list[Document]:
     )
 
     chunks = splitter.split_documents(docs)
-    print(f"Created {len(chunks)} chunks")
+    logger.info("Created %s chunks", len(chunks))
     return chunks

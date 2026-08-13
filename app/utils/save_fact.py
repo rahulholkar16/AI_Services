@@ -1,4 +1,7 @@
+import logging
 from .fact_extractor import _extract_fact
+
+logger = logging.getLogger(__name__)
 
 def _memory_namespace(repo_id: str, user_id: str, kind: str) -> tuple:
     return ("repo", repo_id, "user", user_id, kind)
@@ -14,4 +17,4 @@ async def _save_fact(question, answer, repo_id, user_id, store):
                 {"content": fact},
             )
     except Exception as e:
-            print(f"Fact extraction/save failed: {e!r}")
+            logger.warning("Fact extraction/save failed: %r", e)

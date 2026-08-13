@@ -3,6 +3,7 @@ from sse_starlette.sse import EventSourceResponse, ServerSentEvent
 from pydantic import BaseModel;
 from langchain_core.messages import HumanMessage, AIMessage, ToolMessage, SystemMessage;
 import asyncio;
+import logging;
 from app.utils.Repo_Full_Name_Extracter import extract_full_name;
 from app.utils.message_store import get_or_create_session_id, save_message, generate_and_save_title;
 from app.middleware.rate_limit import limiter
@@ -15,6 +16,7 @@ class AgentRequest(BaseModel):
     repo_id:   str
 
 router = APIRouter();
+logger = logging.getLogger(__name__)
 
 def extract_text(content):
     # Groq/OpenAI
@@ -46,7 +48,7 @@ async def agent_chat(request: Request, body: AgentRequest):
             repo_full_name = extract_full_name(body.repo_url)
 
             config = {"configurable": {"thread_id": body.thread_id}}
-            print("Thread ID:: ", body.thread_id);
+            logger.debug("Thread ID:: %s", body.thread_id)
 
             session_id = await get_or_create_session_id(body.thread_id, body.repo_id, body.question)
             if session_id:
@@ -78,7 +80,7 @@ async def agent_chat(request: Request, body: AgentRequest):
                             continue
                         token_text = extract_text(msg_chunk.content)
                         if token_text:
-                            print("TOKEN:: ", repr(token_text), "| raw content:", repr(msg_chunk.content))
+                            logger.debug("TOKEN:: %r | raw content: %r", token_text, msg_chunk.content)
                             assistant_text_parts.append(token_text)
                             yield {
                                 "event": "message",
@@ -100,7 +102,7 @@ async def agent_chat(request: Request, body: AgentRequest):
                                 continue
 
                             if isinstance(msg, ToolMessage):
-                                print("\nTOOL_RESULT:: ", msg.name)
+                                logger.debug("TOOL_RESULT:: %s", msg.name)
                                 if session_id:
                                     await save_message(
                                         session_id,
@@ -116,7 +118,7 @@ async def agent_chat(request: Request, body: AgentRequest):
 
                             if isinstance(msg, AIMessage) and msg.tool_calls:
                                 for tc in msg.tool_calls:
-                                    print("\nTOOL_CALL:: ", tc["name"])
+                                    logger.debug("TOOL_CALL:: %s", tc["name"])
                                     if session_id:
                                         await save_message(
                                             session_id,

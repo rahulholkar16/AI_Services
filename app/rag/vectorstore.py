@@ -3,6 +3,9 @@ from pinecone import Pinecone, ServerlessSpec;
 from .embeddings import get_embeddings;
 import os;
 import time;
+import logging;
+
+logger = logging.getLogger(__name__)
 
 INDEX_NAME = "github-repo";
 _vector_store = None;
@@ -26,9 +29,9 @@ def __ensure_index_exists ():
 
         while not pc.describe_index(INDEX_NAME).status["ready"]:
             time.sleep(2)
-        print("Index ready!")
+        logger.info("Index ready!")
     else:
-        print(f"Index exists: {INDEX_NAME}");
+        logger.debug("Index exists: %s", INDEX_NAME);
 
 def get_vector_store() -> PineconeVectorStore:
     global _vector_store;
