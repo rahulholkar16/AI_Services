@@ -1,3 +1,7 @@
+# logging setup
+from app.config.logging_config import setup_logging
+setup_logging()
+
 from fastapi import FastAPI;
 from fastapi.middleware.cors import CORSMiddleware;
 from contextlib import asynccontextmanager;
@@ -10,13 +14,15 @@ from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 import os
-from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver;
+import logging
 # Routes
 from app.api import repo_router, agent_router;
 
+logger = logging.getLogger(__name__)
+
 @asynccontextmanager
 async def lifespan (app: FastAPI):
-    print("Application is Start>>>");
+    logger.info("Application is starting...")
     """
     Here we setup DB connetion.
     and Agent Intialization.
@@ -24,17 +30,17 @@ async def lifespan (app: FastAPI):
     try:
         async with engine.connect() as conn:
             await conn.execute(text("SELECT 1"))
-        print("✅ PostgreSQL Connected")
+        logger.info("PostgreSQL connected")
     except Exception as e:
-        print(f"❌ Failed to connect to PostgreSQL: {e}")
+        logger.error("Failed to connect to PostgreSQL: %s", e)
         raise
 
     async with init_agent():
         yield
 
-    print("Application is Stopped")
+    logger.info("Application is stopping")
     await engine.dispose()
-    print("PostgreSQL Connection Pool Closed")
+    logger.info("PostgreSQL connection pool closed")
 
 app = FastAPI(lifespan=lifespan);
 

@@ -1,5 +1,8 @@
+import logging
 from pydantic import BaseModel, Field
 from .cheap_llm import get_cheap_llm
+
+logger = logging.getLogger(__name__)
 
 FACT_EXTRACTOR_PROMPT = """You are filtering an AI coding assistant's answer for durable, \
 reusable facts about a GitHub repository — things like tech stack, frameworks, architecture, \
@@ -47,7 +50,7 @@ async def _extract_fact(question: str, answer: str) -> tuple[str, str] | None:
     try:
         res = await structured_llm.ainvoke(prompt)
     except Exception as e:
-        print(f"Fact extraction structured-output failed: {e!r}")
+        logger.warning("Fact extraction structured-output failed: %r", e)
         return None
 
     if not res or not res.has_fact:

@@ -29,3 +29,4 @@ pydantic
 pyjwt[crypto]
 slowapi
 redis
+colorlog

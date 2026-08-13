@@ -1,10 +1,13 @@
 import json
 import os
+import logging
 from typing import Optional
 
 from sqlalchemy import text
 
 from app.config.db import AsyncSessionLocal
+
+logger = logging.getLogger(__name__)
 
 
 async def get_session_id_for_thread(thread_id: str) -> Optional[str]:
@@ -128,4 +131,4 @@ async def generate_and_save_title(session_id: str, question: str) -> None:
             )
             await db.commit()
     except Exception as e:
-        print(f"⚠️ Title generation failed for session {session_id}: {e}")
+        logger.warning("Title generation failed for session %s: %s", session_id, e)

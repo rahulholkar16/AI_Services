@@ -1,5 +1,6 @@
 import requests;
 import time;
+import logging;
 from fastapi import APIRouter, HTTPException, Request;
 from pydantic import BaseModel;
 from app.rag import get_vector_store, load_repo_documents, chunk_documents;
@@ -12,6 +13,7 @@ router = APIRouter(
     tags=["repo"],
     responses={404: {"description": "Not found"}},
 );
+logger = logging.getLogger(__name__)
 
 class IndexRequest(BaseModel):
     repo_url: str;
@@ -43,7 +45,7 @@ async def index_repo(request: Request, body: IndexRequest):
 
         if already_indexed and body.force:
             index.delete(delete_all=True, namespace=repo_full_name)
-            print(f"Cleared stale index for {repo_full_name}, re-indexing...")
+            logger.info("Cleared stale index for %s, re-indexing...", repo_full_name)
 
         docs = load_repo_documents(repo_full_name)
 
@@ -78,16 +80,15 @@ async def index_repo(request: Request, body: IndexRequest):
                 except Exception as e:
                     if "RESOURCE_EXHAUSTED" in str(e) and attempt < 3:
                         wait = 15 * (attempt + 1)
-                        print(
-                            f"Rate limited on batch "
-                            f"{i}-{min(i + batch_size, total)}. "
-                            f"Retrying in {wait} seconds..."
+                        logger.warning(
+                            "Rate limited on batch %s-%s. Retrying in %s seconds...",
+                            i, min(i + batch_size, total), wait,
                         )
                         time.sleep(wait)
                     else:
                         raise
 
-            print(f"Indexed {min(i + batch_size, total)}/{total} chunks")
+            logger.info("Indexed %s/%s chunks", min(i + batch_size, total), total)
             time.sleep(6)
         return {
             "message": f"Indexed {total} chunks from {repo_full_name}.",

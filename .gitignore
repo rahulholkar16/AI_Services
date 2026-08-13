@@ -14,4 +14,7 @@ chroma_db/
 # Python cache
 *.pyc
 
+.gitignore
+AGENT.md
 test
+logs/

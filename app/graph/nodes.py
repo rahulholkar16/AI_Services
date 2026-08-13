@@ -8,6 +8,9 @@ from langgraph.prebuilt import ToolNode;
 from app.utils import count_tokens, summarize_model, _save_fact, _memory_namespace, _content_to_text
 import uuid;
 import asyncio;
+import logging;
+
+logger = logging.getLogger(__name__)
 
 tools = [
     search_codebase,
@@ -80,9 +83,9 @@ async def call_model (state: State):
 
     if response.tool_calls:
         for tc in response.tool_calls:
-            print(f"Tool called: {tc['name']} | args: {tc['args']}")
+            logger.debug("Tool called: %s | args: %s", tc['name'], tc['args'])
     else:
-        print("No tool called — model answered directly")
+        logger.debug("No tool called — model answered directly")
 
     return {"messages": [response]};
 
@@ -94,7 +97,7 @@ async def compact_message(state: State) -> dict:
 
     token_count = count_tokens(non_system)
     if token_count < SOFT_TRIGGER_TOKENS:
-        print("\n\nTOKEN COUNT:: ", token_count, "\n\n")
+        logger.debug("TOKEN COUNT:: %s", token_count)
         return {}
 
     keep_n = 2 if token_count >= HARD_TRIGGER_TOKENS else KEEP_RAW_TURNS
@@ -118,7 +121,7 @@ async def compact_message(state: State) -> dict:
 
     removal = [RemoveMessage(id=m.id) for m in old if m.id is not None]
     summary_msg = AIMessage(content=f"[Compacted summary]:\n{combined}")
-    print("====SUMMARY_MSG==== \n", summary_msg.content)
+    logger.debug("====SUMMARY_MSG====\n%s", summary_msg.content)
     return {"messages": removal + [summary_msg]}
 
 async def retrieve_memory(state: State, *, store) -> dict:
@@ -141,7 +144,7 @@ async def retrieve_memory(state: State, *, store) -> dict:
             limit=5,
         )
     except Exception as e:
-        print(f"Retrieve_memory failed, continuing without memory: {e!r}")
+        logger.warning("Retrieve_memory failed, continuing without memory: %r", e)
         return {}
 
     if not facts and not episodes:
@@ -175,7 +178,7 @@ async def write_memory(state: State, *, store) -> dict:
                 {"content": episode_content},
             )
         except Exception as e:
-            print(f"Failed to save episode, skipping: {e!r}")
+            logger.warning("Failed to save episode, skipping: %r", e)
 
         task = asyncio.create_task(
             _save_fact(last_user.content, last_ai.content, repo_id, user_id, store)
@@ -190,4 +193,4 @@ def _log_task_exception(task: asyncio.Task):
         return
     exc = task.exception()
     if exc:
-        print(f"Background fact-extraction task failed: {exc!r}")
+        logger.error("Background fact-extraction task failed: %r", exc)
