@@ -5,8 +5,7 @@ from langchain_core.messages import (
     SystemMessage, AIMessage, ToolMessage, RemoveMessage
 )
 from langgraph.prebuilt import ToolNode;
-from app.utils import count_tokens, summarize_model, _save_fact, _memory_namespace, _content_to_text
-import uuid;
+from app.utils import count_tokens, summarize_model, _save_fact, _memory_namespace, _content_to_text, _save_episode, log_task_exception
 import asyncio;
 import logging;
 
@@ -137,7 +136,12 @@ async def retrieve_memory(state: State, *, store) -> dict:
             break
 
     try:
-        facts = await store.asearch(_memory_namespace(repo_id, user_id, "facts"), limit=20)
+        facts = await store.asearch(
+            _memory_namespace(repo_id, user_id, "facts"),
+            query=last_user_text,
+            limit=20
+        )
+
         episodes = await store.asearch(
             _memory_namespace(repo_id, user_id, "episodes"),
             query=last_user_text,
@@ -170,27 +174,16 @@ async def write_memory(state: State, *, store) -> dict:
     last_ai = next((m for m in reversed(state["messages"]) if isinstance(m, AIMessage)), None)
 
     if last_user and last_ai:
-        episode_content = f"Q: {_content_to_text(last_user.content)}\nA: {_content_to_text(last_ai.content)}"
-        try:
-            await store.aput(
-                _memory_namespace(repo_id, user_id, "episodes"),
-                str(uuid.uuid4()),
-                {"content": episode_content},
-            )
-        except Exception as e:
-            logger.warning("Failed to save episode, skipping: %r", e)
+        episode_task = asyncio.create_task(
+            _save_episode(last_user.content, last_ai.content, repo_id, user_id, store)
+        )
 
-        task = asyncio.create_task(
+        episode_task.add_done_callback(log_task_exception)
+        
+        fact_task = asyncio.create_task(
             _save_fact(last_user.content, last_ai.content, repo_id, user_id, store)
         )
-        task.add_done_callback(_log_task_exception)
+
+        fact_task.add_done_callback(log_task_exception)
 
     return {}
-
-
-def _log_task_exception(task: asyncio.Task):
-    if task.cancelled():
-        return
-    exc = task.exception()
-    if exc:
-        logger.error("Background fact-extraction task failed: %r", exc)
