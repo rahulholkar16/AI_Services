@@ -1,5 +1,6 @@
 from starlette.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
+import asyncio
 import os
 import jwt
 from jwt import PyJWKClient
@@ -30,7 +31,7 @@ class AuthMiddleware (BaseHTTPMiddleware):
 
         token = auth_header.removeprefix("Bearer ").strip()
         try:
-            user_id = _verify_token(token)
+            user_id = await asyncio.to_thread(_verify_token, token)
         except jwt.ExpiredSignatureError:
             return JSONResponse(status_code=401, content={"detail": "Token expired"})
         except Exception:

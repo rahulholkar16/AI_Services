@@ -47,6 +47,7 @@ app = FastAPI(lifespan=lifespan);
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 app.add_middleware(SlowAPIMiddleware)
+app.add_middleware(AuthMiddleware)
 
 FRONTEND_URL = os.getenv("FRONTEND_URL");
 app.add_middleware(
@@ -60,8 +61,6 @@ app.add_middleware(
 @app.get("/")
 def main ():
     return { "status": "ok" }
-
-app.add_middleware(AuthMiddleware)
 
 app.include_router(repo_router);
 app.include_router(agent_router);
