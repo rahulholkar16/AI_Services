@@ -10,6 +10,8 @@ from .message_store import (
     generate_and_save_title,
 )
 from .save_fact import _memory_namespace, _save_fact
+from .save_episode import _save_episode
+from .task_utils import log_task_exception
 
 __all__ = [
     "count_tokens",
@@ -24,5 +26,7 @@ __all__ = [
     "generate_and_save_title",
     "_memory_namespace",
     "_save_fact",
-    "_content_to_text"
+    "_content_to_text",
+    "_save_episode",
+    "log_task_exception",
 ]
