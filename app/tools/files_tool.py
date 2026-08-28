@@ -1,5 +1,8 @@
 import requests
+from typing import Annotated
 from langchain.tools import tool
+from langgraph.prebuilt import InjectedState
+from app.graph.state import State
 import base64
 import os
 
@@ -37,14 +40,14 @@ def get_default_branch(repo_full_name: str) -> str:
 
 
 @tool
-def list_directory(repo_full_name: str):
+def list_directory(repo_full_name: str, state: Annotated[State, InjectedState]):
     """
     List ALL files in a GitHub repo recursively.
     Use this first to understand complete project structure.
     repo_full_name format: 'owner/repo'
     """
     try:
-        branch = get_default_branch(repo_full_name)  # ✅ Actual branch naam
+        branch = state.get("branch") or get_default_branch(repo_full_name)
         url = f"https://api.github.com/repos/{repo_full_name}/git/trees/{branch}?recursive=1"
         res = requests.get(url, headers=HEADERS)
 
@@ -77,7 +80,7 @@ def list_directory(repo_full_name: str):
         return f"Error listing directory: {str(e)}"
 
 @tool
-def read_file(repo_full_name: str, file_path: str):
+def read_file(repo_full_name: str, file_path: str, state: Annotated[State, InjectedState]):
     """
     Read a specific file from GitHub repo.
     Use for understanding implementation details.
@@ -85,8 +88,9 @@ def read_file(repo_full_name: str, file_path: str):
     file_path: 'src/auth.ts', 'app/page.tsx',
     """
     try:
+        branch = state.get("branch") or get_default_branch(repo_full_name)
         url = f"https://api.github.com/repos/{repo_full_name}/contents/{file_path}"
-        res = requests.get(url, headers=HEADERS)
+        res = requests.get(url, headers=HEADERS, params={"ref": branch})
 
         if not res.ok:
             return f"File not found: {file_path}"

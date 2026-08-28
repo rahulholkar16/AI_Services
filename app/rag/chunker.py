@@ -22,9 +22,9 @@ ALLOW_EXTENSIONS = {
 MAX_FILE_SIZE = 50000
 
 
-def get_repo_files(repo_full_name: str) -> list[str]:
-    branch = get_default_branch(repo_full_name)
-    url = f"https://api.github.com/repos/{repo_full_name}/git/trees/{branch}?recursive=1"  # ✅ /HEAD hataya
+def get_repo_files(repo_full_name: str, branch: str | None = None) -> list[str]:
+    branch = branch or get_default_branch(repo_full_name)
+    url = f"https://api.github.com/repos/{repo_full_name}/git/trees/{branch}?recursive=1"
     res = requests.get(url, headers=HEADERS) 
 
     if not res.ok:
@@ -54,9 +54,10 @@ def get_repo_files(repo_full_name: str) -> list[str]:
     return files
 
 
-def fetch_file_content(repo_full_name: str, file_path: str) -> str | None:
+def fetch_file_content(repo_full_name: str, file_path: str, branch: str | None = None) -> str | None:
     url = f"https://api.github.com/repos/{repo_full_name}/contents/{file_path}"
-    res = requests.get(url, headers=HEADERS)
+    params = {"ref": branch} if branch else {}
+    res = requests.get(url, headers=HEADERS, params=params)
 
     if not res.ok:
         return None
@@ -69,14 +70,14 @@ def fetch_file_content(repo_full_name: str, file_path: str) -> str | None:
         return None
 
 
-def load_repo_documents(repo_full_name: str) -> list[Document]:
-    files = get_repo_files(repo_full_name)
+def load_repo_documents(repo_full_name: str, branch: str | None = None) -> list[Document]:
+    files = get_repo_files(repo_full_name, branch)
     docs = []
 
     logger.info("Found %s files to index...", len(files))
 
     for path in files:
-        content = fetch_file_content(repo_full_name, path)
+        content = fetch_file_content(repo_full_name, path, branch)
         if not content:
             continue
 

@@ -1,76 +1,55 @@
-# Long-Term Memory — Implementation Plan
+# Long-Term Memory — Implementation Status
 
-Status: **Planning phase — not yet implemented.**
-This file tracks the plan for adding long-term (cross-thread) memory to the agent.
-Update this file as the plan changes or as steps get implemented.
+Status: **Implemented and in production use.**
+Tracks the long-term (cross-thread) memory layer added to the agent, plus related
+hardening work (auth, rate limiting, connection pooling). Update this file as things change.
 
-## Goal
+## What exists
 
-Currently the agent only has:
 - **Short-term memory**: `AsyncPostgresSaver` (checkpointer) — scoped to a single thread.
 - **Chat history log**: `app/utils/message_store.py` — raw messages saved to `chat_sessions` /
   `messages` tables, used for frontend history display only. The agent itself never reads from it.
+- **Long-term memory**: `AsyncPostgresStore` (LangGraph), same Postgres instance as the
+  checkpointer, holding two kinds of memory per `(repo_id, user_id)`:
+  - **Facts** (`app/utils/save_fact.py`, `fact_extractor.py`) — durable, overwritable
+    key-value knowledge about a repo (e.g. "tech_stack", "auth_mechanism"). Key = topic
+    (LLM-extracted snake_case label), so a new fact on the same topic overwrites the old
+    one instead of accumulating duplicates.
+  - **Episodes** (`app/utils/save_episode.py`, `episodic_extractor.py`) — append-only log
+    of meaningful events (bug fixes, decisions), each with an `importance` score (1-5).
+    An LLM decides per-turn whether the interaction is worth storing (`should_store`) —
+    trivial/greeting turns are skipped, not saved.
+  - Namespace shape: `("repo", repo_id, "user", user_id, "facts"/"episodes")`.
+  - Both retrieval (`retrieve_memory`) and writes (`write_memory`) in `app/graph/nodes.py`
+    are wrapped in try/except so a memory failure never blocks the chat response.
+  - Facts and episodes are both retrieved via semantic search (`query=` param) against the
+    current question, not a blind recent-N grab.
 
-We are adding a **Store**-based long-term memory layer, scoped per-repo, holding two kinds of memory:
+## Reliability / hardening also done
 
-- **Facts** — durable, overwritable key-value knowledge about a repo (e.g. "auth uses JWT",
-  "tech stack is Next.js + Postgres"). One fact per key, latest write wins.
-- **Episodes** — append-only log of past interactions (user question + agent's finding),
-  semantically searchable, so the agent can recall "have I answered something like this before
-  for this repo".
+- **Auth**: JWT middleware (`app/middleware/auth.py`) verifies better-auth tokens via JWKS,
+  protects all routes. `user_id` comes from the verified token, never the request body.
+- **Rate limiting**: per-user (`slowapi` + Redis) — `/agent/chat` 10/min, `/api/repo/index` 10/hour.
+- **Connection pool**: `check=AsyncConnectionPool.check_connection` + `min_size=1` in
+  `db_graph.py` — health-checks connections on checkout to avoid using dead ones
+  ("server closed the connection unexpectedly").
+- **Episode pruning**: `_prune_episodes` in `save_episode.py` runs as a fire-and-forget
+  background task after each episode save. Caps at `MAX_EPISODES_PER_REPO = 100` per
+  `(repo_id, user_id)`; below the cap it's a no-op. When over, deletes lowest-`importance`,
+  then-oldest episodes first.
+- **Background task failures**: shared `log_task_exception` helper (`app/utils/task_utils.py`)
+  attached via `task.add_done_callback(...)` on every fire-and-forget task (fact save,
+  episode save, episode prune) so failures are logged instead of disappearing silently.
+- **Logging**: structured `logging` (see `app/config/logging_config.py`, `dictConfig`-based)
+  replaced `print()` throughout.
 
-Namespaces: `(repo_id, "facts")` and `(repo_id, "episodes")` — repo-scoped so memory never leaks
-across repos.
+## Open / parked for later
 
-## Files to be created
-
-### `app/config/db_store.py` — **new**
-- Sets up `AsyncPostgresStore` (LangGraph) using the existing `CHECKPOINT_DATABASE_URL`
-  (same Postgres instance the checkpointer already uses — no new infra).
-- `init_store()` async context manager, calls `store.setup()` on startup.
-- Configures embedding index (for episodes' semantic search) — facts don't need embedding
-  since they're looked up by known keys.
-
-## Files to be modified
-
-### `app/state.py`
-- Add `store = None` next to the existing `agent = None`.
-
-### `app/config/db_graph.py`
-- `init_agent()` also initializes the store via `init_store()`.
-- Sets `state.store = store`.
-- `build_graph(checkpointer, store)` — store now passed through to the graph.
-
-### `app/graph/builder.py`
-- Signature becomes `async def build_graph(checkpointer, store):`
-- Two new nodes added: `retrieve_memory`, `write_memory`.
-- New edge flow:
-  - Before: `compact → planner → tools → compact`
-  - After: `compact → retrieve_memory → planner → tools → compact`, with `write_memory`
-    running after the planner's final response (before END).
-- `graph.compile(checkpointer=checkpointer, store=store)`.
-
-### `app/graph/nodes.py`
-- New function `retrieve_memory(state, *, store)`:
-  - Looks up facts + episodes for `state["repo_id"]`.
-  - Injects them as a `SystemMessage` into the conversation before the planner runs.
-- New function `write_memory(state, *, store)`:
-  - Always logs an episode for the turn (user question + agent's answer).
-  - Simple rule-based check (v1) decides if anything is fact-worthy and saves it;
-    can be upgraded later to an LLM-based classifier (similar pattern to
-    `app/utils/summarize_model.py`).
-- Existing functions (`call_model`, `compact_message`, `tool_node`) are untouched.
-
-## Files intentionally NOT touched
-
-- `app/graph/state.py` — `repo_id` already exists in state, no new field needed.
-- `app/utils/message_store.py` — separate concern (chat history for UI), unrelated to agent memory.
-- `app/tools/*`, `app/rag/*`, `app/api/*` — no changes needed.
-
-## Open decisions / follow-ups
-
-- [ ] `write_memory` fact-detection is rule-based for v1 — revisit with an LLM classifier if needed.
-- [ ] Decide if `write_memory` should run as a blocking graph step or as a fire-and-forget
-      background task (similar to how title generation in `agent.py` uses `asyncio.create_task`)
-      to avoid adding latency to the user-facing response.
-- [ ] Fact key naming convention needs to be decided so facts overwrite cleanly instead of colliding.
+- [ ] **Migrations decoupled from app startup** — `checkpointer.setup()` / `store.setup()`
+      currently run every time the app starts (in `init_agent()`, `db_graph.py`). Harmless
+      as a single instance, but risks a race condition if multiple replicas start
+      concurrently in production (concurrent `CREATE TABLE IF NOT EXISTS`). Plan: move
+      `setup()` calls into a standalone one-time script (e.g. `scripts/migrate.py`) run
+      once in the deploy pipeline before app instances start; app startup then only opens
+      the pool, assumes tables already exist. **Decided to revisit later, not urgent yet
+      at current (single-instance) scale.**

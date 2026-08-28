@@ -1,8 +1,11 @@
+from typing import Annotated;
 from langchain.tools import tool;
+from langgraph.prebuilt import InjectedState;
 from app.rag import get_vector_store;
+from app.graph.state import State;
 
 @tool
-def search_codebase (repo_full_name: str, query: str) -> str:
+def search_codebase (query: str, state: Annotated[State, InjectedState]) -> str:
     """
     Semantically search the entire codebase.
     Use this for large repos instead of reading files manually.
@@ -13,12 +16,15 @@ def search_codebase (repo_full_name: str, query: str) -> str:
     - 'error handling patterns'
     - 'API endpoints list'
 
-    repo_full_name format: 'owner/repo'
     Returns relevant code chunks with file paths.
     """
     try:
+        repo_full_name = state["repo_full_name"]
+        branch = state.get("branch")
+        namespace = f"{repo_full_name}#{branch}" if branch else repo_full_name
+
         store = get_vector_store();
-        results = store.similarity_search_with_score(query, k=5, filter={"repo_full_name": repo_full_name});
+        results = store.similarity_search_with_score(query, k=5, namespace=namespace);
 
         if not results:
             return f"No relevant code found for: {query}";
