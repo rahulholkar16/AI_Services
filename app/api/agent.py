@@ -14,6 +14,7 @@ class AgentRequest(BaseModel):
     question:  str
     thread_id: str
     repo_id:   str
+    branch:    str
 
 router = APIRouter();
 logger = logging.getLogger(__name__)
@@ -64,6 +65,7 @@ async def agent_chat(request: Request, body: AgentRequest):
                     "user_id": user_id,
                     "thread_id": body.thread_id,
                     "pr_pending": None,
+                    "branch": body.branch
                 },
                 config=config,
                 stream_mode=["updates", "messages"],

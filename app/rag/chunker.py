@@ -1,4 +1,4 @@
-import requests
+import httpx
 import base64
 import logging
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -22,12 +22,13 @@ ALLOW_EXTENSIONS = {
 MAX_FILE_SIZE = 50000
 
 
-def get_repo_files(repo_full_name: str) -> list[str]:
-    branch = get_default_branch(repo_full_name)
-    url = f"https://api.github.com/repos/{repo_full_name}/git/trees/{branch}?recursive=1"  # ✅ /HEAD hataya
-    res = requests.get(url, headers=HEADERS) 
+async def get_repo_files(repo_full_name: str, branch: str | None = None) -> list[str]:
+    branch = branch or await get_default_branch(repo_full_name)
+    url = f"https://api.github.com/repos/{repo_full_name}/git/trees/{branch}?recursive=1"
+    async with httpx.AsyncClient() as client:
+        res = await client.get(url, headers=HEADERS)
 
-    if not res.ok:
+    if res.status_code >= 400:
         raise ValueError(f"Failed to fetch tree: {res.status_code}")
 
     tree = res.json().get("tree", [])
@@ -54,11 +55,13 @@ def get_repo_files(repo_full_name: str) -> list[str]:
     return files
 
 
-def fetch_file_content(repo_full_name: str, file_path: str) -> str | None:
+async def fetch_file_content(repo_full_name: str, file_path: str, branch: str | None = None) -> str | None:
     url = f"https://api.github.com/repos/{repo_full_name}/contents/{file_path}"
-    res = requests.get(url, headers=HEADERS)
+    params = {"ref": branch} if branch else {}
+    async with httpx.AsyncClient() as client:
+        res = await client.get(url, headers=HEADERS, params=params)
 
-    if not res.ok:
+    if res.status_code >= 400:
         return None
 
     data = res.json()
@@ -69,14 +72,14 @@ def fetch_file_content(repo_full_name: str, file_path: str) -> str | None:
         return None
 
 
-def load_repo_documents(repo_full_name: str) -> list[Document]:
-    files = get_repo_files(repo_full_name)
+async def load_repo_documents(repo_full_name: str, branch: str | None = None) -> list[Document]:
+    files = await get_repo_files(repo_full_name, branch)
     docs = []
 
     logger.info("Found %s files to index...", len(files))
 
     for path in files:
-        content = fetch_file_content(repo_full_name, path)
+        content = await fetch_file_content(repo_full_name, path, branch)
         if not content:
             continue
 

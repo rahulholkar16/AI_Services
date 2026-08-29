@@ -1,5 +1,8 @@
-import requests
+import httpx
+from typing import Annotated
 from langchain.tools import tool
+from langgraph.prebuilt import InjectedState
+from app.graph.state import State
 import base64
 import os
 
@@ -27,28 +30,30 @@ ALLOW_EXTENSIONS = {
 }
 
 
-def get_default_branch(repo_full_name: str) -> str:
+async def get_default_branch(repo_full_name: str) -> str:
     """Repo ka default branch (main/master) pata karo."""
     url = f"https://api.github.com/repos/{repo_full_name}"
-    res = requests.get(url, headers=HEADERS)
-    if res.ok:
+    async with httpx.AsyncClient() as client:
+        res = await client.get(url, headers=HEADERS)
+    if res.status_code < 400:
         return res.json().get("default_branch", "main")
     return "main"  # fallback
 
 
 @tool
-def list_directory(repo_full_name: str):
+async def list_directory(repo_full_name: str, state: Annotated[State, InjectedState]):
     """
     List ALL files in a GitHub repo recursively.
     Use this first to understand complete project structure.
     repo_full_name format: 'owner/repo'
     """
     try:
-        branch = get_default_branch(repo_full_name)  # ✅ Actual branch naam
+        branch = state.get("branch") or await get_default_branch(repo_full_name)
         url = f"https://api.github.com/repos/{repo_full_name}/git/trees/{branch}?recursive=1"
-        res = requests.get(url, headers=HEADERS)
+        async with httpx.AsyncClient() as client:
+            res = await client.get(url, headers=HEADERS)
 
-        if not res.ok:
+        if res.status_code >= 400:
             return f"Failed to list repo: {res.status_code}"
 
         data = res.json()
@@ -77,7 +82,7 @@ def list_directory(repo_full_name: str):
         return f"Error listing directory: {str(e)}"
 
 @tool
-def read_file(repo_full_name: str, file_path: str):
+async def read_file(repo_full_name: str, file_path: str, state: Annotated[State, InjectedState]):
     """
     Read a specific file from GitHub repo.
     Use for understanding implementation details.
@@ -85,10 +90,12 @@ def read_file(repo_full_name: str, file_path: str):
     file_path: 'src/auth.ts', 'app/page.tsx',
     """
     try:
+        branch = state.get("branch") or await get_default_branch(repo_full_name)
         url = f"https://api.github.com/repos/{repo_full_name}/contents/{file_path}"
-        res = requests.get(url, headers=HEADERS)
+        async with httpx.AsyncClient() as client:
+            res = await client.get(url, headers=HEADERS, params={"ref": branch})
 
-        if not res.ok:
+        if res.status_code >= 400:
             return f"File not found: {file_path}"
 
         data = res.json()
@@ -109,7 +116,7 @@ def read_file(repo_full_name: str, file_path: str):
 
 
 @tool
-def search_file(repo_full_name: str, query: str) -> str:
+async def search_file(repo_full_name: str, query: str) -> str:
     """
     Search files by name in GitHub repo.
     repo_full_name format: 'owner/repo'
@@ -117,9 +124,10 @@ def search_file(repo_full_name: str, query: str) -> str:
     try:
         url = "https://api.github.com/search/code"
         params = {"q": f"repo:{repo_full_name} filename:{query}", "per_page": 10}
-        res = requests.get(url, headers=HEADERS, params=params)
+        async with httpx.AsyncClient() as client:
+            res = await client.get(url, headers=HEADERS, params=params)
 
-        if not res.ok:
+        if res.status_code >= 400:
             return f"Search failed: {res.status_code}"
 
         items = res.json().get("items", [])
@@ -133,7 +141,7 @@ def search_file(repo_full_name: str, query: str) -> str:
 
 
 @tool
-def search_code(repo_full_name: str, query: str) -> str:
+async def search_code(repo_full_name: str, query: str) -> str:
     """
     Search for exact keyword inside code files.
     repo_full_name format: 'owner/repo'
@@ -141,9 +149,10 @@ def search_code(repo_full_name: str, query: str) -> str:
     try:
         url = "https://api.github.com/search/code"
         params = {"q": f"repo:{repo_full_name} {query}", "per_page": 10}
-        res = requests.get(url, headers=HEADERS, params=params)
+        async with httpx.AsyncClient() as client:
+            res = await client.get(url, headers=HEADERS, params=params)
 
-        if not res.ok:
+        if res.status_code >= 400:
             return f"Search failed: {res.status_code}"
 
         items = res.json().get("items", [])
