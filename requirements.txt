@@ -30,3 +30,4 @@ pyjwt[crypto]
 slowapi
 redis
 colorlog
+httpx

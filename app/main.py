@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware;
 from contextlib import asynccontextmanager;
 from app.config.db import engine;
 from app.config.db_graph import init_agent;
+from app.rag import close_index;
 from sqlalchemy import text;
 from app.middleware.auth import AuthMiddleware
 from app.middleware.rate_limit import limiter
@@ -38,6 +39,7 @@ async def lifespan (app: FastAPI):
     async with init_agent():
         yield
 
+    await close_index()
     logger.info("Application is stopping")
     await engine.dispose()
     logger.info("PostgreSQL connection pool closed")

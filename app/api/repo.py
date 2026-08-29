@@ -1,9 +1,9 @@
-import requests;
-import time;
+import httpx;
+import asyncio;
 import logging;
 from fastapi import APIRouter, HTTPException, Request;
 from pydantic import BaseModel;
-from app.rag import get_vector_store, load_repo_documents, chunk_documents;
+from app.rag import get_index, load_repo_documents, chunk_documents, embed_and_build_vectors;
 from app.utils.Repo_Full_Name_Extracter import extract_full_name;
 from app.tools.files_tool import HEADERS, get_default_branch, IGNORE_DIRS, ALLOW_EXTENSIONS;
 from app.middleware.rate_limit import limiter
@@ -31,11 +31,10 @@ async def index_repo(request: Request, body: IndexRequest):
         repo_full_name = extract_full_name(body.repo_url)
         branch = body.branch
         namespace = f"{repo_full_name}#{branch}" if branch else repo_full_name
-        vector_store = get_vector_store()
-        index = vector_store._index
 
-        # Check if namespace already exists
-        stats = index.describe_index_stats()
+        index = await get_index()
+
+        stats = await index.describe_index_stats()
         already_indexed = namespace in stats.get("namespaces", {})
 
         if already_indexed and not body.force:
@@ -46,10 +45,10 @@ async def index_repo(request: Request, body: IndexRequest):
             }
 
         if already_indexed and body.force:
-            index.delete(delete_all=True, namespace=namespace)
+            await index.delete(delete_all=True, namespace=namespace)
             logger.info("Cleared stale index for %s, re-indexing...", repo_full_name)
 
-        docs = load_repo_documents(repo_full_name, branch)
+        docs = await load_repo_documents(repo_full_name, branch)
 
         if not docs:
             raise HTTPException(
@@ -73,10 +72,8 @@ async def index_repo(request: Request, body: IndexRequest):
 
             for attempt in range(4):
                 try:
-                    vector_store.add_documents(
-                        documents=batch,
-                        namespace=namespace,
-                    )
+                    vectors = await embed_and_build_vectors(batch)
+                    await index.upsert(vectors=vectors, namespace=namespace)
                     break
 
                 except Exception as e:
@@ -86,12 +83,12 @@ async def index_repo(request: Request, body: IndexRequest):
                             "Rate limited on batch %s-%s. Retrying in %s seconds...",
                             i, min(i + batch_size, total), wait,
                         )
-                        time.sleep(wait)
+                        await asyncio.sleep(wait)
                     else:
                         raise
 
             logger.info("Indexed %s/%s chunks", min(i + batch_size, total), total)
-            time.sleep(5)
+            await asyncio.sleep(5)
         return {
             "message": f"Indexed {total} chunks from {repo_full_name}.",
             "repo_full_name": repo_full_name,
@@ -147,12 +144,13 @@ async def get_repo_tree(request: TreeRequest):
     """
     try:
         repo_full_name = extract_full_name(request.repo_url)
-        branch = get_default_branch(repo_full_name)
+        branch = await get_default_branch(repo_full_name)
 
         url = f"https://api.github.com/repos/{repo_full_name}/git/trees/{branch}?recursive=1"
-        res = requests.get(url, headers=HEADERS)
+        async with httpx.AsyncClient() as client:
+            res = await client.get(url, headers=HEADERS)
 
-        if not res.ok:
+        if res.status_code >= 400:
             raise HTTPException(status_code=res.status_code, detail="Failed to fetch repository tree")
 
         tree_items = res.json().get("tree", [])
@@ -185,11 +183,12 @@ async def get_repo_info(request: TreeRequest):
     """
     try:
         repo_full_name = extract_full_name(request.repo_url)
-        res = requests.get(
-            f"https://api.github.com/repos/{repo_full_name}",
-            headers=HEADERS,
-        )
-        if not res.ok:
+        async with httpx.AsyncClient() as client:
+            res = await client.get(
+                f"https://api.github.com/repos/{repo_full_name}",
+                headers=HEADERS,
+            )
+        if res.status_code >= 400:
             raise HTTPException(status_code=res.status_code, detail="Repository not found")
 
         data = res.json()
