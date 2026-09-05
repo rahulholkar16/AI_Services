@@ -23,8 +23,11 @@ connection_kwargs = {
 async def init_agent():
     async with AsyncConnectionPool(
         conninfo=DATABASE_URL,
-        max_size=10,
+        max_size=40,
         min_size=1,
+        max_lifetime=1800,
+        max_idle=600,
+        reconnect_timeout=10,
         kwargs=connection_kwargs,
         check=AsyncConnectionPool.check_connection,
     ) as pool:
