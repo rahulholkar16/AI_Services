@@ -12,6 +12,7 @@ from .message_store import (
 from .save_fact import _memory_namespace, _save_fact
 from .save_episode import _save_episode
 from .task_utils import log_task_exception
+from .redis_util import cache_get, cache_set, cache_json_get, cache_json_set
 
 __all__ = [
     "count_tokens",
@@ -29,4 +30,8 @@ __all__ = [
     "_content_to_text",
     "_save_episode",
     "log_task_exception",
+    "cache_get",
+    "cache_set",
+    "cache_json_get",
+    "cache_json_set"
 ]

@@ -5,6 +5,7 @@ from langgraph.prebuilt import InjectedState
 from app.graph.state import State
 import base64
 import os
+from app.utils import cache_get, cache_set
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -32,12 +33,20 @@ ALLOW_EXTENSIONS = {
 
 async def get_default_branch(repo_full_name: str) -> str:
     """Repo ka default branch (main/master) pata karo."""
+    key = f"default_branch:{repo_full_name}"
+    cached = await cache_get(key)
+    if cached:
+        return cached
+    
     url = f"https://api.github.com/repos/{repo_full_name}"
     async with httpx.AsyncClient() as client:
         res = await client.get(url, headers=HEADERS)
     if res.status_code < 400:
-        return res.json().get("default_branch", "main")
-    return "main"  # fallback
+        branch = res.json().get("default_branch", "main")
+        await cache_set(key, branch, ttl=3600)
+        return branch
+    
+    return "main"
 
 
 @tool
@@ -49,6 +58,11 @@ async def list_directory(repo_full_name: str, state: Annotated[State, InjectedSt
     """
     try:
         branch = state.get("branch") or await get_default_branch(repo_full_name)
+        cache_key = f"tree:{repo_full_name}:{branch}"
+        cached = await cache_get(cache_key)
+        if cached:
+            return cached
+
         url = f"https://api.github.com/repos/{repo_full_name}/git/trees/{branch}?recursive=1"
         async with httpx.AsyncClient() as client:
             res = await client.get(url, headers=HEADERS)
@@ -76,7 +90,9 @@ async def list_directory(repo_full_name: str, state: Annotated[State, InjectedSt
                     output.append(f"📄 {path}")
 
         result = "\n".join(output[:100])
-        return result if result else "No relevant files found."
+        result = result if result else "No relevant files found."
+        await cache_set(cache_key, result, ttl=900)
+        return result
 
     except Exception as e:
         return f"Error listing directory: {str(e)}"
@@ -91,6 +107,11 @@ async def read_file(repo_full_name: str, file_path: str, state: Annotated[State,
     """
     try:
         branch = state.get("branch") or await get_default_branch(repo_full_name)
+        cache_key = f"file:{repo_full_name}:{branch}:{file_path}"
+        cached = await cache_get(cache_key)
+        if cached:
+            return cached
+        
         url = f"https://api.github.com/repos/{repo_full_name}/contents/{file_path}"
         async with httpx.AsyncClient() as client:
             res = await client.get(url, headers=HEADERS, params={"ref": branch})
@@ -109,7 +130,9 @@ async def read_file(repo_full_name: str, file_path: str, state: Annotated[State,
         if len(content) > 3000:
             content = content[:3000] + "\n...[truncated]"
 
-        return f"File: {file_path}\n\n{content}"
+        result = f"File: {file_path}\n\n{content}"
+        await cache_set(cache_key, result, ttl=900)
+        return result
 
     except Exception as e:
         return f"Error reading file: {str(e)}"

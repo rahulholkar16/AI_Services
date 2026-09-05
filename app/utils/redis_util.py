@@ -1,3 +1,4 @@
+import json
 import logging
 from app.config.redis import _get_client
 
@@ -14,4 +15,22 @@ async def cache_get(key: str) -> str | None:
         return await _get_client().get(key)
     except Exception as e:
         logger.warning("Cache read failed for key=%s: %r", key, e)
+        return None
+
+
+async def cache_json_set(key: str, value: dict | list, ttl: int) -> None:
+    try:
+        await cache_set(key, json.dumps(value), ttl)
+    except (TypeError, ValueError) as e:
+        logger.warning("Cache JSON encode failed for key=%s: %r", key, e)
+
+
+async def cache_json_get(key: str) -> dict | list | None:
+    raw = await cache_get(key)
+    if raw is None:
+        return None
+    try:
+        return json.loads(raw)
+    except (json.JSONDecodeError, TypeError) as e:
+        logger.warning("Cache JSON decode failed for key=%s: %r", key, e)
         return None
