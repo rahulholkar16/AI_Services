@@ -36,8 +36,8 @@ def extract_text(content):
     
     return str(content)
 
+# @limiter.limit("10/minute")
 @router.post("/agent/chat")
-@limiter.limit("10/minute")
 async def agent_chat(request: Request, body: AgentRequest):
     user_id = request.state.user_id
 
