@@ -5,7 +5,7 @@ from app.rag import get_index, get_embeddings;
 from app.graph.state import State;
 
 @tool
-async def search_codebase (query: str, state: Annotated[State, InjectedState]) -> str:
+async def search_codebase (query: str, state: Annotated[State, InjectedState], extension: str | None = None,) -> str:
     """
     Semantically search the entire codebase.
     Use this for large repos instead of reading files manually.
@@ -16,9 +16,23 @@ async def search_codebase (query: str, state: Annotated[State, InjectedState]) -
     - 'error handling patterns'
     - 'API endpoints list'
 
+    Args:
+        query: Natural language search query describing what to find.
+        extension: Optional file extension to restrict the search to a
+            single language/file type, including the leading dot
+            (e.g. ".py", ".ts", ".tsx", ".json", ".md"). Set this only
+            when the user's request clearly targets one file type
+            (e.g. "python me database connection code dhundo" ->
+            extension=".py", "frontend component dhundo" -> extension=".tsx").
+            Leave as None for a general search across all file types.
+
     Returns relevant code chunks with file paths.
     """
     try:
+        filter_dict = {}
+        if extension:
+            filter_dict["extension"] = {"$eq": extension}
+
         repo_full_name = state["repo_full_name"]
         branch = state.get("branch")
         namespace = f"{repo_full_name}#{branch}" if branch else repo_full_name
@@ -32,6 +46,7 @@ async def search_codebase (query: str, state: Annotated[State, InjectedState]) -
             top_k=5,
             namespace=namespace,
             include_metadata=True,
+            filter=filter_dict or None
         )
 
         matches = response.get("matches", [])
@@ -40,9 +55,6 @@ async def search_codebase (query: str, state: Annotated[State, InjectedState]) -
 
         output = [];
         for match in matches:
-            # Pinecone's cosine-metric score IS the similarity already
-            # (higher = closer), unlike langchain's similarity_search_with_score
-            # which returned a distance needing (1 - score).
             relevance = round(match.get("score", 0) * 100, 1)
             metadata = match.get("metadata", {}) or {}
             content = (metadata.get("text") or "").strip()
