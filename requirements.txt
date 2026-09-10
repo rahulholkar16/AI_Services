@@ -17,6 +17,7 @@ langchain-pinecone
 langchain-text-splitters
 langgraph
 langgraph-checkpoint-postgres
+langsmith
 
 # Vector DB
 pinecone
@@ -31,3 +32,4 @@ slowapi
 redis
 colorlog
 httpx
+cohere
