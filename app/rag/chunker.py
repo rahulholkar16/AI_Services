@@ -1,11 +1,25 @@
 import httpx
 import base64
 import logging
-from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_text_splitters import RecursiveCharacterTextSplitter, Language
 from langchain_core.documents import Document
 from app.tools.files_tool import get_default_branch, HEADERS
 
 logger = logging.getLogger(__name__)
+
+EXTENSION_TO_LANGUAGE = {
+    ".py": Language.PYTHON,
+    ".js": Language.JS,
+    ".jsx": Language.JS,
+    ".ts": Language.TS,
+    ".tsx": Language.TS,
+    ".go": Language.GO,
+    ".java": Language.JAVA,
+    ".rs": Language.RUST,
+    ".cpp": Language.CPP,
+    ".c": Language.CPP,
+    ".c++": Language.CPP,
+}
 
 IGNORE_DIRS = {
     ".git", "node_modules", ".next", "dist",
@@ -95,14 +109,29 @@ async def load_repo_documents(repo_full_name: str, branch: str | None = None) ->
     logger.info("Loaded %s documents", len(docs))
     return docs
 
-
 def chunk_documents(docs: list[Document]) -> list[Document]:
-    splitter = RecursiveCharacterTextSplitter(
+    all_chunks = []
+    for doc in docs:
+        ext = doc.metadata.get("extension", "")
+        splitter = get_splitter_for_extension(ext)
+        chunks = splitter.split_documents([doc])
+        all_chunks.extend(chunks)
+
+    logger.info("Created %s chunks", len(all_chunks))
+    return all_chunks
+
+def get_splitter_for_extension (ext: str) -> RecursiveCharacterTextSplitter:
+    language = EXTENSION_TO_LANGUAGE.get(ext)
+    if language:
+        return RecursiveCharacterTextSplitter.from_language(
+            language=language,
+            chunk_size=800,
+            chunk_overlap=100,
+            length_function=len,
+        )
+
+    return RecursiveCharacterTextSplitter(
         chunk_size=800,
         chunk_overlap=100,
         length_function=len,
     )
-
-    chunks = splitter.split_documents(docs)
-    logger.info("Created %s chunks", len(chunks))
-    return chunks

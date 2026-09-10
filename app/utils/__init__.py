@@ -13,6 +13,8 @@ from .save_fact import _memory_namespace, _save_fact
 from .save_episode import _save_episode
 from .task_utils import log_task_exception
 from .redis_util import cache_get, cache_set, cache_json_get, cache_json_set
+from .memory_messages import MEMORY_PREFIX, find_old_memory_messages
+from .reranker import rerank
 
 __all__ = [
     "count_tokens",
@@ -33,5 +35,8 @@ __all__ = [
     "cache_get",
     "cache_set",
     "cache_json_get",
-    "cache_json_set"
+    "cache_json_set",
+    "MEMORY_PREFIX",
+    "find_old_memory_messages",
+    "rerank",
 ]
