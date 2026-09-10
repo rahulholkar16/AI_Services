@@ -24,7 +24,7 @@ async def init_agent():
     async with AsyncConnectionPool(
         conninfo=DATABASE_URL,
         max_size=40,
-        min_size=1,
+        min_size=5,
         max_lifetime=1800,
         max_idle=600,
         reconnect_timeout=10,
