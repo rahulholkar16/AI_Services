@@ -15,6 +15,7 @@ from .task_utils import log_task_exception
 from .redis_util import cache_get, cache_set, cache_json_get, cache_json_set
 from .memory_messages import MEMORY_PREFIX, find_old_memory_messages
 from .reranker import rerank
+from .github_helpers import HEADERS, GITHUB_TOKEN, get_default_branch, friendly_pr_error
 
 __all__ = [
     "count_tokens",
@@ -39,4 +40,8 @@ __all__ = [
     "MEMORY_PREFIX",
     "find_old_memory_messages",
     "rerank",
+    "HEADERS",
+    "GITHUB_TOKEN",
+    "get_default_branch",
+    "friendly_pr_error",
 ]

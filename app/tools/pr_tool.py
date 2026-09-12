@@ -7,8 +7,7 @@ from langchain_core.messages import ToolMessage
 from langgraph.prebuilt import InjectedState
 from langgraph.types import Command
 from app.graph.state import State
-from app.tools.files_tool import HEADERS, get_default_branch
-from app.utils import cache_get, cache_set
+from app.utils import cache_get, cache_set, HEADERS, get_default_branch
 
 logger = logging.getLogger(__name__)
 GITHUB_API = "https://api.github.com"
@@ -255,41 +254,3 @@ async def propose_pull_request(
         "pr_pending": pending,
         "messages": [ToolMessage(content=summary, tool_call_id=tool_call_id)],
     })
-
-
-async def create_pull_request_direct(
-    repo_full_name: str,
-    title: str,
-    head: str,
-    base: str,
-    body: str,
-) -> dict:
-    """
-    Actually creates the PR on GitHub. Called only from the /api/pr/confirm
-    route after the user has explicitly confirmed a pending proposal —
-    never called directly by the LLM/agent.
-    """
-    url = f"{GITHUB_API}/repos/{repo_full_name}/pulls"
-    payload = {"title": title, "head": head, "base": base, "body": body}
-
-    try:
-        async with httpx.AsyncClient() as client:
-            res = await client.post(url, headers=HEADERS, json=payload)
-
-        if res.status_code >= 400:
-            detail = res.json().get("message", res.text) if res.content else res.text
-            logger.warning("create_pull_request_direct failed: %s - %s", res.status_code, detail)
-            return {"error": f"GitHub rejected the PR ({res.status_code}): {detail}"}
-
-        data = res.json()
-        return {"html_url": data["html_url"], "number": data["number"]}
-
-    except httpx.TimeoutException:
-        logger.warning("create_pull_request_direct timed out for repo=%s", repo_full_name)
-        return {"error": "GitHub API timed out while creating the PR."}
-    except httpx.RequestError as e:
-        logger.warning("create_pull_request_direct network error for repo=%s: %r", repo_full_name, e)
-        return {"error": "Network error reaching GitHub while creating the PR."}
-    except Exception:
-        logger.exception("create_pull_request_direct failed for repo=%s", repo_full_name)
-        return {"error": "Unexpected error creating the PR, check server logs."}

@@ -10,5 +10,6 @@ class State (TypedDict):
     user_id: str
     thread_id: str
     pr_pending: dict | None
+    branch_pending: dict | None
     branch: str
 

@@ -1,4 +1,4 @@
-from app.tools import list_directory, read_file, search_file, search_code, search_codebase, fetch_all_pull_request, get_pr_status, get_pr_diff, propose_pull_request;
+from app.tools import list_directory, read_file, search_file, search_code, search_codebase, fetch_all_pull_request, get_pr_status, get_pr_diff, propose_pull_request, propose_branch;
 from .state import State;
 from  app.llm import llm;
 from langchain_core.messages import (
@@ -21,6 +21,7 @@ tools = [
     get_pr_status,
     get_pr_diff,
     propose_pull_request,
+    propose_branch,
 ];
 
 SOFT_TRIGGER_TOKENS = 60000
@@ -72,6 +73,9 @@ Do NOT mention, narrate, or announce that you are making tool calls (e.g. never 
 - get_pr_status: Use to check a specific PR's mergeable state, checks, commit/file counts. Requires a PR number — ask the user if they haven't given one.
 - get_pr_diff: Use before reviewing, summarizing, or analyzing what a specific PR changes.
 - propose_pull_request: Use ONLY when the user explicitly asks to open/create a PR. This never creates the PR directly — it only stages a proposal (title, description, branches) and asks the user to confirm. You must write a clear title and description yourself based on context. NEVER call this more than once for the same request without new user input, NEVER tell the user the PR has been created after calling this (it hasn't), and NEVER attempt to create a PR through any other means. If the user hasn't given required info (e.g. which branch), ask them — do not guess.
+
+## Branch tools
+- propose_branch: Use ONLY when the user explicitly asks to create/make a new branch. This never creates the branch directly — it only stages a proposal (name, source branch) and asks the user to confirm. Requires a branch name from the user — ask if not given, never invent one. Defaults to branching from the currently active branch if no source is specified. NEVER call this more than once for the same request without new user input, and NEVER tell the user the branch has been created after calling this (it hasn't). Only call it on an explicit request, never as a side effect of another task (e.g. don't propose a branch just because the user is discussing a PR).
 
 ## Output format
 - Short explanation in plain language first.

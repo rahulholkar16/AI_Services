@@ -69,7 +69,7 @@ async def confirm_pr(body: ConfirmRequest):
         logger.exception("confirm_pr: failed to persist resolution for thread_id=%s", body.thread_id)
 
     if "error" in result:
-        return {"success": False, "error": result["error"]}
+        return {"success": False, "error": result["error"], "retryable": result.get("retryable", True)}
 
     return {"success": True, "pr_url": result["html_url"], "pr_number": result["number"]}
 

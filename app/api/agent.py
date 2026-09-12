@@ -66,6 +66,7 @@ async def agent_chat(request: Request, body: AgentRequest):
                     "user_id": user_id,
                     "thread_id": body.thread_id,
                     "pr_pending": None,
+                    "branch_pending": None,
                     "branch": body.branch
                 },
                 config=config,
@@ -103,6 +104,14 @@ async def agent_chat(request: Request, body: AgentRequest):
                                 "data": json.dumps(pr_pending),
                             }
 
+                        branch_pending = node_data.get("branch_pending")
+                        if branch_pending:
+                            logger.debug("BRANCH_PROPOSAL:: %s", branch_pending)
+                            yield {
+                                "event": "branch_proposal",
+                                "data": json.dumps(branch_pending),
+                            }
+
                         messages = node_data.get("messages")
                         if not messages:
                             continue
@@ -118,13 +127,15 @@ async def agent_chat(request: Request, body: AgentRequest):
                                     tool_call_entry = {"name": msg.name, "type": "tool_result"}
                                     if msg.name == "propose_pull_request" and pr_pending:
                                         tool_call_entry["pr_proposal"] = pr_pending
+                                    if msg.name == "propose_branch" and branch_pending:
+                                        tool_call_entry["branch_proposal"] = branch_pending
                                     await save_message(
                                         session_id,
                                         "tool",
                                         extract_text(msg.content) or (msg.name or "tool"),
                                         tool_calls=[tool_call_entry],
                                     )
-                                if msg.name != "propose_pull_request":
+                                if msg.name not in ("propose_pull_request", "propose_branch"):
                                     yield {
                                         "event": "tool_result",
                                         "data": msg.name or "tool",

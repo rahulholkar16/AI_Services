@@ -5,9 +5,9 @@ from fastapi import APIRouter, HTTPException, Request;
 from pydantic import BaseModel;
 from app.rag import get_index, load_repo_documents, chunk_documents, embed_and_build_vectors;
 from app.utils.Repo_Full_Name_Extracter import extract_full_name;
-from app.tools.files_tool import HEADERS, get_default_branch, IGNORE_DIRS, ALLOW_EXTENSIONS;
+from app.tools.files_tool import IGNORE_DIRS, ALLOW_EXTENSIONS;
 from app.middleware.rate_limit import limiter
-from app.utils import cache_json_get, cache_json_set
+from app.utils import cache_json_get, cache_json_set, HEADERS, get_default_branch
 
 router = APIRouter(
     prefix="/api/repo",

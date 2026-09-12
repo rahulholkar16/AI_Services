@@ -3,7 +3,7 @@ import base64
 import logging
 from langchain_text_splitters import RecursiveCharacterTextSplitter, Language
 from langchain_core.documents import Document
-from app.tools.files_tool import get_default_branch, HEADERS
+from app.utils import get_default_branch, HEADERS
 
 logger = logging.getLogger(__name__)
 

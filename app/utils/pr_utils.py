@@ -1,6 +1,6 @@
 import logging
 import httpx
-from app.tools.files_tool import HEADERS
+from app.utils.github_helpers import HEADERS, friendly_pr_error
 
 logger = logging.getLogger(__name__)
 GITHUB_API = "https://api.github.com"
@@ -14,13 +14,9 @@ async def create_pull_request_direct(
     body: str = "",
 ) -> dict:
     """
-    Actually create the pull request on GitHub. This is NOT an agent tool — the LLM
-    can never call this directly. It is only called from backend code (e.g. agent.py)
-    after the user has explicitly confirmed a pending proposal created by
-    propose_pull_request.
-
-    Returns a dict with either the created PR info (number, html_url, title, state)
-    or an 'error' key describing what went wrong.
+    Actually creates the PR on GitHub. Called only from the /api/pr/confirm
+    route after the user has explicitly confirmed a pending proposal —
+    never called directly by the LLM/agent.
     """
     url = f"{GITHUB_API}/repos/{repo_full_name}/pulls"
     payload = {"title": title, "head": head, "base": base, "body": body}
@@ -30,30 +26,25 @@ async def create_pull_request_direct(
             res = await client.post(url, headers=HEADERS, json=payload)
 
         if res.status_code >= 400:
-            try:
-                detail = res.json().get("message", res.text)
-            except Exception:
-                detail = res.text
+            body_json = res.json() if res.content else {}
+            detail = body_json.get("message", res.text)
+            errors = body_json.get("errors") or []
             logger.warning(
-                "create_pull_request_direct failed for repo=%s: %s - %s",
-                repo_full_name, res.status_code, detail,
+                "create_pull_request_direct failed: %s - %s | errors=%s | payload=%s",
+                res.status_code, detail, errors, payload,
             )
-            return {"error": f"Failed to create PR: {detail}"}
+            friendly = friendly_pr_error(res.status_code, detail, errors, head, base)
+            return {"error": friendly["message"], "retryable": friendly["retryable"]}
 
         data = res.json()
-        return {
-            "number": data["number"],
-            "html_url": data["html_url"],
-            "title": data["title"],
-            "state": data["state"],
-        }
+        return {"html_url": data["html_url"], "number": data["number"]}
 
     except httpx.TimeoutException:
         logger.warning("create_pull_request_direct timed out for repo=%s", repo_full_name)
-        return {"error": "GitHub API timed out while creating PR."}
+        return {"error": "GitHub API timed out while creating the PR.", "retryable": True}
     except httpx.RequestError as e:
         logger.warning("create_pull_request_direct network error for repo=%s: %r", repo_full_name, e)
-        return {"error": "Network error reaching GitHub while creating PR."}
+        return {"error": "Network error reaching GitHub while creating the PR.", "retryable": True}
     except Exception:
         logger.exception("create_pull_request_direct failed for repo=%s", repo_full_name)
-        return {"error": "Unexpected error creating PR, check server logs."}
+        return {"error": "Unexpected error creating the PR, check server logs.", "retryable": True}

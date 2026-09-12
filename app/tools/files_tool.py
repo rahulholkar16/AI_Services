@@ -2,24 +2,19 @@ import httpx
 import logging
 from typing import Annotated
 from langchain.tools import tool
+from langchain_core.tools import InjectedToolCallId
+from langchain_core.messages import ToolMessage
 from langgraph.prebuilt import InjectedState
+from langgraph.types import Command
 from app.graph.state import State
 import base64
 import os
-from app.utils import cache_get, cache_set
+from app.utils import cache_get, cache_set, HEADERS, get_default_branch
 
 from dotenv import load_dotenv
 load_dotenv()
 
 logger = logging.getLogger(__name__)
-
-GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
-HEADERS = {
-    "Accept": "application/vnd.github+json"
-}
-
-if GITHUB_TOKEN:
-    HEADERS["Authorization"] = f"Bearer {GITHUB_TOKEN}"
 
 IGNORE_DIRS = {
     ".git", "node_modules", ".next", "dist",
@@ -32,24 +27,6 @@ ALLOW_EXTENSIONS = {
     ".css", ".html", ".sh", ".go", ".rs",
     ".java", ".c", ".cpp", ".c++", ".h", ".prisma"
 }
-
-
-async def get_default_branch(repo_full_name: str) -> str:
-    """Repo ka default branch (main/master) pata karo."""
-    key = f"default_branch:{repo_full_name}"
-    cached = await cache_get(key)
-    if cached:
-        return cached
-    
-    url = f"https://api.github.com/repos/{repo_full_name}"
-    async with httpx.AsyncClient() as client:
-        res = await client.get(url, headers=HEADERS)
-    if res.status_code < 400:
-        branch = res.json().get("default_branch", "main")
-        await cache_set(key, branch, ttl=3600)
-        return branch
-    
-    return "main"
 
 
 @tool
@@ -158,6 +135,65 @@ async def read_file(repo_full_name: str, file_path: str, state: Annotated[State,
     except Exception:
         logger.exception("read_file failed for repo=%s path=%s", repo_full_name, file_path)
         return f"Error reading file: unexpected error for {file_path}, check server logs."
+
+
+@tool
+async def propose_branch(
+    new_branch: str,
+    tool_call_id: Annotated[str, InjectedToolCallId],
+    state: Annotated[State, InjectedState],
+    source_branch: str | None = None,
+) -> Command:
+    """
+    Propose creating a new branch in the current repo. This does NOT create the branch yet —
+    it only stages a proposal and asks the user for confirmation. Use this ONLY when the user
+    explicitly asks to create/make a new branch — never assume permission, never call this
+    more than once per proposal, and never treat this as if the branch were already created.
+
+    Args:
+        new_branch: Name for the new branch (e.g. 'feature/add-caching'). Required — if the
+            user hasn't given a name, ask them instead of inventing one.
+        source_branch: Branch to create it from. Optional — defaults to the currently active
+            branch in this session, or the repo's default branch if none is set.
+    """
+    repo_full_name = state.get("repo_full_name")
+    if not repo_full_name:
+        return Command(update={
+            "messages": [ToolMessage(
+                content="Error: no repo is currently active in this session.",
+                tool_call_id=tool_call_id,
+            )],
+        })
+
+    if not new_branch or not new_branch.strip():
+        return Command(update={
+            "messages": [ToolMessage(
+                content="Error: new_branch name is required. Ask the user what they want to name the branch.",
+                tool_call_id=tool_call_id,
+            )],
+        })
+
+    resolved_source = source_branch or state.get("branch") or await get_default_branch(repo_full_name)
+
+    pending = {
+        "repo_full_name": repo_full_name,
+        "new_branch": new_branch.strip(),
+        "source_branch": resolved_source,
+    }
+
+    summary = (
+        "I'm ready to create this branch, but I need your confirmation first:\n\n"
+        f"- Repo: {repo_full_name}\n"
+        f"- New branch: {new_branch.strip()}\n"
+        f"- From: {resolved_source}\n\n"
+        "Reply 'confirm' / 'yes' to create it, tell me a different name/source branch, "
+        "or say 'cancel' to drop this."
+    )
+
+    return Command(update={
+        "branch_pending": pending,
+        "messages": [ToolMessage(content=summary, tool_call_id=tool_call_id)],
+    })
 
 
 @tool
