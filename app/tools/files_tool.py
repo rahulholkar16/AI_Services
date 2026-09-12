@@ -1,13 +1,17 @@
 import httpx
+import logging
 from typing import Annotated
 from langchain.tools import tool
 from langgraph.prebuilt import InjectedState
 from app.graph.state import State
 import base64
 import os
+from app.utils import cache_get, cache_set
 
 from dotenv import load_dotenv
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 HEADERS = {
@@ -32,12 +36,20 @@ ALLOW_EXTENSIONS = {
 
 async def get_default_branch(repo_full_name: str) -> str:
     """Repo ka default branch (main/master) pata karo."""
+    key = f"default_branch:{repo_full_name}"
+    cached = await cache_get(key)
+    if cached:
+        return cached
+    
     url = f"https://api.github.com/repos/{repo_full_name}"
     async with httpx.AsyncClient() as client:
         res = await client.get(url, headers=HEADERS)
     if res.status_code < 400:
-        return res.json().get("default_branch", "main")
-    return "main"  # fallback
+        branch = res.json().get("default_branch", "main")
+        await cache_set(key, branch, ttl=3600)
+        return branch
+    
+    return "main"
 
 
 @tool
@@ -49,6 +61,11 @@ async def list_directory(repo_full_name: str, state: Annotated[State, InjectedSt
     """
     try:
         branch = state.get("branch") or await get_default_branch(repo_full_name)
+        cache_key = f"tree:{repo_full_name}:{branch}"
+        cached = await cache_get(cache_key)
+        if cached:
+            return cached
+
         url = f"https://api.github.com/repos/{repo_full_name}/git/trees/{branch}?recursive=1"
         async with httpx.AsyncClient() as client:
             res = await client.get(url, headers=HEADERS)
@@ -75,11 +92,25 @@ async def list_directory(repo_full_name: str, state: Annotated[State, InjectedSt
                 if ext in ALLOW_EXTENSIONS:
                     output.append(f"📄 {path}")
 
+        total = len(output)
         result = "\n".join(output[:100])
-        return result if result else "No relevant files found."
+        if not result:
+            result = "No relevant files found."
+        elif total > 100:
+            result += f"\n\n...[truncated: showing 100 of {total} files. Use read_file/search_file for specific paths not shown here.]"
 
-    except Exception as e:
-        return f"Error listing directory: {str(e)}"
+        await cache_set(cache_key, result, ttl=900)
+        return result
+
+    except httpx.TimeoutException:
+        logger.warning("list_directory timed out for repo=%s", repo_full_name)
+        return "Error listing directory: GitHub API timed out. Try again."
+    except httpx.RequestError as e:
+        logger.warning("list_directory network error for repo=%s: %r", repo_full_name, e)
+        return "Error listing directory: network error reaching GitHub."
+    except Exception:
+        logger.exception("list_directory failed for repo=%s", repo_full_name)
+        return "Error listing directory: unexpected error, check server logs."
 
 @tool
 async def read_file(repo_full_name: str, file_path: str, state: Annotated[State, InjectedState]):
@@ -91,6 +122,11 @@ async def read_file(repo_full_name: str, file_path: str, state: Annotated[State,
     """
     try:
         branch = state.get("branch") or await get_default_branch(repo_full_name)
+        cache_key = f"file:{repo_full_name}:{branch}:{file_path}"
+        cached = await cache_get(cache_key)
+        if cached:
+            return cached
+        
         url = f"https://api.github.com/repos/{repo_full_name}/contents/{file_path}"
         async with httpx.AsyncClient() as client:
             res = await client.get(url, headers=HEADERS, params={"ref": branch})
@@ -109,19 +145,33 @@ async def read_file(repo_full_name: str, file_path: str, state: Annotated[State,
         if len(content) > 3000:
             content = content[:3000] + "\n...[truncated]"
 
-        return f"File: {file_path}\n\n{content}"
+        result = f"File: {file_path}\n\n{content}"
+        await cache_set(cache_key, result, ttl=900)
+        return result
 
-    except Exception as e:
-        return f"Error reading file: {str(e)}"
+    except httpx.TimeoutException:
+        logger.warning("read_file timed out for repo=%s path=%s", repo_full_name, file_path)
+        return f"Error reading file: GitHub API timed out for {file_path}."
+    except httpx.RequestError as e:
+        logger.warning("read_file network error for repo=%s path=%s: %r", repo_full_name, file_path, e)
+        return f"Error reading file: network error reaching GitHub for {file_path}."
+    except Exception:
+        logger.exception("read_file failed for repo=%s path=%s", repo_full_name, file_path)
+        return f"Error reading file: unexpected error for {file_path}, check server logs."
 
 
 @tool
-async def search_file(repo_full_name: str, query: str) -> str:
+async def search_file(query: str, state: Annotated[State, InjectedState]) -> str:
     """
     Search files by name in GitHub repo.
-    repo_full_name format: 'owner/repo'
     """
     try:
+        repo_full_name = state["repo_full_name"]
+        cache_key = f"search_file:{repo_full_name}:{query}"
+        cached = await cache_get(cache_key)
+        if cached:
+            return cached
+
         url = "https://api.github.com/search/code"
         params = {"q": f"repo:{repo_full_name} filename:{query}", "per_page": 10}
         async with httpx.AsyncClient() as client:
@@ -134,19 +184,36 @@ async def search_file(repo_full_name: str, query: str) -> str:
         if not items:
             return f"No files found for: {query}"
 
-        return "\n".join([f"📄 {item['path']}" for item in items])
+        result = "\n".join([f"📄 {item['path']}" for item in items])
+        await cache_set(cache_key, result, ttl=900)
+        return result
 
-    except Exception as e:
-        return f"Error searching file: {str(e)}"
+    except httpx.TimeoutException:
+        logger.warning("search_file timed out for query=%s", query)
+        return "Error searching file: GitHub API timed out. Try again."
+    except httpx.RequestError as e:
+        logger.warning("search_file network error for query=%s: %r", query, e)
+        return "Error searching file: network error reaching GitHub."
+    except Exception:
+        logger.exception("search_file failed for query=%s", query)
+        return "Error searching file: unexpected error, check server logs."
 
 
 @tool
-async def search_code(repo_full_name: str, query: str) -> str:
+async def search_code(query: str, state: Annotated[State, InjectedState]) -> str:
     """
     Search for exact keyword inside code files.
-    repo_full_name format: 'owner/repo'
+    Use this for exact string/symbol matches (e.g. a specific function
+    or variable name). For conceptual/semantic questions, prefer
+    search_codebase instead.
     """
     try:
+        repo_full_name = state["repo_full_name"]
+        cache_key = f"search_code:{repo_full_name}:{query}"
+        cached = await cache_get(cache_key)
+        if cached:
+            return cached
+
         url = "https://api.github.com/search/code"
         params = {"q": f"repo:{repo_full_name} {query}", "per_page": 10}
         async with httpx.AsyncClient() as client:
@@ -159,7 +226,16 @@ async def search_code(repo_full_name: str, query: str) -> str:
         if not items:
             return f"No code found for: {query}"
 
-        return "\n".join([f"📄 {item['path']}" for item in items])
+        result = "\n".join([f"📄 {item['path']}" for item in items])
+        await cache_set(cache_key, result, ttl=900)
+        return result
 
-    except Exception as e:
-        return f"Error searching code: {str(e)}"
+    except httpx.TimeoutException:
+        logger.warning("search_code timed out for query=%s", query)
+        return "Error searching code: GitHub API timed out. Try again."
+    except httpx.RequestError as e:
+        logger.warning("search_code network error for query=%s: %r", query, e)
+        return "Error searching code: network error reaching GitHub."
+    except Exception:
+        logger.exception("search_code failed for query=%s", query)
+        return "Error searching code: unexpected error, check server logs."

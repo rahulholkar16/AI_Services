@@ -1,11 +1,11 @@
-from app.tools import list_directory, read_file, search_file, search_code, search_codebase;
+from app.tools import list_directory, read_file, search_file, search_code, search_codebase, fetch_all_pull_request, get_pr_status, get_pr_diff, propose_pull_request;
 from .state import State;
 from  app.llm import llm;
 from langchain_core.messages import (
     SystemMessage, AIMessage, ToolMessage, RemoveMessage
 )
 from langgraph.prebuilt import ToolNode;
-from app.utils import count_tokens, summarize_model, _save_fact, _memory_namespace, _content_to_text, _save_episode, log_task_exception
+from app.utils import count_tokens, summarize_model, _save_fact, _memory_namespace, _content_to_text, _save_episode, log_task_exception, MEMORY_PREFIX, find_old_memory_messages
 import asyncio;
 import logging;
 
@@ -17,10 +17,14 @@ tools = [
     read_file,
     search_file,
     search_code,
+    fetch_all_pull_request,
+    get_pr_status,
+    get_pr_diff,
+    propose_pull_request,
 ];
 
-SOFT_TRIGGER_TOKENS = 120_000 
-HARD_TRIGGER_TOKENS = 250_000
+SOFT_TRIGGER_TOKENS = 60000
+HARD_TRIGGER_TOKENS = 120000
 KEEP_RAW_TURNS = 4             
 
 llm_with_tools = llm.bind_tools(tools);
@@ -50,11 +54,24 @@ Typical flow: list_directory (if needed) → search_file / search_codebase / sea
 ## Avoid redundant tool calls
 - Never call the same tool with the same arguments twice in this conversation — check what you've already looked up before calling a tool again.
 - If a file has already been read earlier in this conversation, reuse that content instead of reading it again, unless the user explicitly asks you to re-read it (e.g. after saying they changed the file).
+- Before calling search_codebase (or any search tool) for a specific function, class, variable, or symbol, first check whether its code is already visible in this conversation — from an earlier read_file, list_directory, or a previous search result. If the file containing it has already been read in full, that file's content already covers everything in it; do not search_codebase for individual names/symbols defined inside a file you've already read (e.g. after read_file("app/middleware/auth.py"), do NOT then run separate search_codebase calls for "JWKS_URL", "_verify_token", "PyJWKClient", "class AuthMiddleware" — all of that is already in the file you have). Only search for something genuinely not yet seen in this conversation.
 - Once you have enough evidence to answer confidently, stop calling tools and answer — don't keep exploring "just in case."
 
 ## Parallel tool calls
-If you need to look up multiple independent things (e.g. reading 2 different files, or searching 2 different unrelated terms), call all the relevant tools in the SAME turn instead of one at a time — this saves time. Only call tools sequentially when one result is needed to decide the next call.
+If you need to look up multiple independent things (e.g. reading 2+ different files, or searching 2+ unrelated terms), call ALL of those tools together in the SAME turn — issue multiple tool_calls in one response instead of calling one, waiting for the result, then calling the next. Each extra round-trip re-sends the entire conversation so far, so calling tools one at a time when they don't depend on each other wastes both time and tokens. Only call tools sequentially when one result is genuinely needed to decide the next call's arguments (e.g. you must list_directory before you know which file to read).
+
+Example — analyzing a system made of several files (e.g. "review my graph/pipeline/module"):
+- WRONG: read_file(builder.py) → wait for result → read_file(nodes.py) → wait for result → read_file(state.py)
+- RIGHT: read_file(builder.py) + read_file(nodes.py) + read_file(state.py) all issued as tool_calls in the SAME response, since none of these reads depends on another's content.
+This applies any time you already know (from list_directory, search_file, or search_codebase results, or from the user's message) which 2+ files or queries you need — issue them together, don't trickle them out one per turn.
+
 Do NOT mention, narrate, or announce that you are making tool calls (e.g. never write things like "(Reading server.js, routes/UserRoute.js in parallel)" in your answer) — just call the tools silently and use their results to write your final answer.
+
+## Pull request tools
+- fetch_all_pull_request: Use to list open/closed/all PRs in the current repo.
+- get_pr_status: Use to check a specific PR's mergeable state, checks, commit/file counts. Requires a PR number — ask the user if they haven't given one.
+- get_pr_diff: Use before reviewing, summarizing, or analyzing what a specific PR changes.
+- propose_pull_request: Use ONLY when the user explicitly asks to open/create a PR. This never creates the PR directly — it only stages a proposal (title, description, branches) and asks the user to confirm. You must write a clear title and description yourself based on context. NEVER call this more than once for the same request without new user input, NEVER tell the user the PR has been created after calling this (it hasn't), and NEVER attempt to create a PR through any other means. If the user hasn't given required info (e.g. which branch), ask them — do not guess.
 
 ## Output format
 - Short explanation in plain language first.
@@ -68,7 +85,7 @@ async def call_model (state: State):
 
     memory_blocks = [
         m.content for m in messages
-        if isinstance(m, SystemMessage) and str(m.content).startswith("[Long-term memory]")
+        if isinstance(m, SystemMessage) and str(m.content).startswith(MEMORY_PREFIX)
     ]
     non_system_message = [m for m in messages if not isinstance(m, SystemMessage)]
 
@@ -129,30 +146,33 @@ async def retrieve_memory(state: State, *, store) -> dict:
     if not repo_id or not user_id:
         return {}
 
-    last_user_text = ""
-    for m in reversed(state["messages"]):
-        if m.type == "human":
-            last_user_text = m.content
-            break
+    last_user_text = next(
+        (m.content for m in reversed(state["messages"]) if m.type == "human"),
+        "",
+    )
+
+    removal = find_old_memory_messages(state["messages"])
 
     try:
-        facts = await store.asearch(
-            _memory_namespace(repo_id, user_id, "facts"),
-            query=last_user_text,
-            limit=20
-        )
-
-        episodes = await store.asearch(
-            _memory_namespace(repo_id, user_id, "episodes"),
-            query=last_user_text,
-            limit=5,
+        facts, episodes = await asyncio.gather(
+            store.asearch(
+                _memory_namespace(repo_id, user_id, "facts"),
+                query=last_user_text,
+                limit=20,
+            ),
+            store.asearch(
+                _memory_namespace(repo_id, user_id, "episodes"),
+                query=last_user_text,
+                limit=5,
+            ),
         )
     except Exception as e:
-        logger.warning("Retrieve_memory failed, continuing without memory: %r", e)
-        return {}
+        logger.warning("retrieve_memory failed, continuing without memory: %r", e)
+        return {"messages": removal}
 
     if not facts and not episodes:
-        return {}
+        logger.debug("No facts/episodes found for repo_id=%s", repo_id)
+        return {"messages": removal}
 
     facts_text = "\n".join(f"- {f.value.get('content', '')}" for f in facts)
     episodes_text = "\n".join(f"- {e.value.get('content', '')}" for e in episodes)
@@ -162,7 +182,12 @@ async def retrieve_memory(state: State, *, store) -> dict:
         f"Relevant past interactions:\n{episodes_text}" if episodes_text else "",
     ]))
 
-    return {"messages": [SystemMessage(content=f"[Long-term memory]:\n{memory_block}")]}
+    logger.debug(
+        "Injected memory: %d fact(s), %d episode(s), replaced %d old block(s)",
+        len(facts), len(episodes), len(removal),
+    )
+
+    return {"messages": removal + [SystemMessage(content=f"{MEMORY_PREFIX}:\n{memory_block}")]}
 
 async def write_memory(state: State, *, store) -> dict:
     repo_id = state.get("repo_id", "")

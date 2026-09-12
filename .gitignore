@@ -18,3 +18,7 @@ chroma_db/
 AGENT.md
 test
 logs/
+
+*.sh
+locustfile.py
+scripts/

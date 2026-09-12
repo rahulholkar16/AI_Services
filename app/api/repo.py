@@ -7,6 +7,7 @@ from app.rag import get_index, load_repo_documents, chunk_documents, embed_and_b
 from app.utils.Repo_Full_Name_Extracter import extract_full_name;
 from app.tools.files_tool import HEADERS, get_default_branch, IGNORE_DIRS, ALLOW_EXTENSIONS;
 from app.middleware.rate_limit import limiter
+from app.utils import cache_json_get, cache_json_set
 
 router = APIRouter(
     prefix="/api/repo",
@@ -24,8 +25,8 @@ class TreeRequest(BaseModel):
     repo_url: str;
 
 
+# @limiter.limit("10/hour")
 @router.post("/index")
-@limiter.limit("10/hour")
 async def index_repo(request: Request, body: IndexRequest):
     try:
         repo_full_name = extract_full_name(body.repo_url)
@@ -183,6 +184,12 @@ async def get_repo_info(request: TreeRequest):
     """
     try:
         repo_full_name = extract_full_name(request.repo_url)
+        cache_key = f"repoinfo:{repo_full_name}"
+        cached = await cache_json_get(cache_key)
+
+        if cached:
+            return cached
+
         async with httpx.AsyncClient() as client:
             res = await client.get(
                 f"https://api.github.com/repos/{repo_full_name}",
@@ -194,7 +201,7 @@ async def get_repo_info(request: TreeRequest):
         data = res.json()
         owner, name = repo_full_name.split("/")
 
-        return {
+        result = {
             "owner": owner,
             "name": name,
             "language": data.get("language") or "Unknown",
@@ -202,6 +209,9 @@ async def get_repo_info(request: TreeRequest):
             "description": data.get("description") or "",
             "default_branch": data.get("default_branch"),
         }
+
+        await cache_json_set(cache_key, result, ttl=600)
+        return result
     except HTTPException:
         raise
     except Exception as e:

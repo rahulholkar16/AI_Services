@@ -3,6 +3,7 @@ from sse_starlette.sse import EventSourceResponse, ServerSentEvent
 from pydantic import BaseModel;
 from langchain_core.messages import HumanMessage, AIMessage, ToolMessage, SystemMessage;
 import asyncio;
+import json;
 import logging;
 from app.utils.Repo_Full_Name_Extracter import extract_full_name;
 from app.utils.message_store import get_or_create_session_id, save_message, generate_and_save_title;
@@ -36,8 +37,8 @@ def extract_text(content):
     
     return str(content)
 
+# @limiter.limit("10/minute")
 @router.post("/agent/chat")
-@limiter.limit("10/minute")
 async def agent_chat(request: Request, body: AgentRequest):
     user_id = request.state.user_id
 
@@ -94,6 +95,14 @@ async def agent_chat(request: Request, body: AgentRequest):
                         if not node_data:
                             continue
 
+                        pr_pending = node_data.get("pr_pending")
+                        if pr_pending:
+                            logger.debug("PR_PROPOSAL:: %s", pr_pending)
+                            yield {
+                                "event": "pr_proposal",
+                                "data": json.dumps(pr_pending),
+                            }
+
                         messages = node_data.get("messages")
                         if not messages:
                             continue
@@ -106,16 +115,20 @@ async def agent_chat(request: Request, body: AgentRequest):
                             if isinstance(msg, ToolMessage):
                                 logger.debug("TOOL_RESULT:: %s", msg.name)
                                 if session_id:
+                                    tool_call_entry = {"name": msg.name, "type": "tool_result"}
+                                    if msg.name == "propose_pull_request" and pr_pending:
+                                        tool_call_entry["pr_proposal"] = pr_pending
                                     await save_message(
                                         session_id,
                                         "tool",
                                         extract_text(msg.content) or (msg.name or "tool"),
-                                        tool_calls=[{"name": msg.name, "type": "tool_result"}],
+                                        tool_calls=[tool_call_entry],
                                     )
-                                yield {
-                                    "event": "tool_result",
-                                    "data": msg.name or "tool",
-                                }
+                                if msg.name != "propose_pull_request":
+                                    yield {
+                                        "event": "tool_result",
+                                        "data": msg.name or "tool",
+                                    }
                                 continue
 
                             if isinstance(msg, AIMessage) and msg.tool_calls:

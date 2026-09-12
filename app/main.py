@@ -17,7 +17,7 @@ from slowapi.middleware import SlowAPIMiddleware
 import os
 import logging
 # Routes
-from app.api import repo_router, agent_router;
+from app.api import repo_router, agent_router, pr_router;
 
 logger = logging.getLogger(__name__)
 
@@ -66,4 +66,5 @@ def main ():
 
 app.include_router(repo_router);
 app.include_router(agent_router);
+app.include_router(pr_router);
 

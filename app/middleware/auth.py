@@ -1,9 +1,12 @@
+import logging
 from starlette.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 import asyncio
 import os
 import jwt
 from jwt import PyJWKClient
+
+logger = logging.getLogger(__name__)
 
 JWKS_URL = f"{os.getenv("FRONTEND_URL")}/api/auth/jwks"
 _jwks_client = PyJWKClient(JWKS_URL)
@@ -30,6 +33,7 @@ class AuthMiddleware (BaseHTTPMiddleware):
             return JSONResponse(status_code=401, content={"detail": "Missing or invalid Authorization header"})
 
         token = auth_header.removeprefix("Bearer ").strip()
+        logger.info("[LOAD-TEST-DEBUG] Incoming JWT for %s: %s", request.url.path, token)
         try:
             user_id = await asyncio.to_thread(_verify_token, token)
         except jwt.ExpiredSignatureError:
