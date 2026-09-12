@@ -1,4 +1,4 @@
-from app.tools import list_directory, read_file, search_file, search_code, search_codebase;
+from app.tools import list_directory, read_file, search_file, search_code, search_codebase, fetch_all_pull_request, get_pr_status, get_pr_diff, propose_pull_request;
 from .state import State;
 from  app.llm import llm;
 from langchain_core.messages import (
@@ -17,6 +17,10 @@ tools = [
     read_file,
     search_file,
     search_code,
+    fetch_all_pull_request,
+    get_pr_status,
+    get_pr_diff,
+    propose_pull_request,
 ];
 
 SOFT_TRIGGER_TOKENS = 60000
@@ -62,6 +66,12 @@ Example — analyzing a system made of several files (e.g. "review my graph/pipe
 This applies any time you already know (from list_directory, search_file, or search_codebase results, or from the user's message) which 2+ files or queries you need — issue them together, don't trickle them out one per turn.
 
 Do NOT mention, narrate, or announce that you are making tool calls (e.g. never write things like "(Reading server.js, routes/UserRoute.js in parallel)" in your answer) — just call the tools silently and use their results to write your final answer.
+
+## Pull request tools
+- fetch_all_pull_request: Use to list open/closed/all PRs in the current repo.
+- get_pr_status: Use to check a specific PR's mergeable state, checks, commit/file counts. Requires a PR number — ask the user if they haven't given one.
+- get_pr_diff: Use before reviewing, summarizing, or analyzing what a specific PR changes.
+- propose_pull_request: Use ONLY when the user explicitly asks to open/create a PR. This never creates the PR directly — it only stages a proposal (title, description, branches) and asks the user to confirm. You must write a clear title and description yourself based on context. NEVER call this more than once for the same request without new user input, NEVER tell the user the PR has been created after calling this (it hasn't), and NEVER attempt to create a PR through any other means. If the user hasn't given required info (e.g. which branch), ask them — do not guess.
 
 ## Output format
 - Short explanation in plain language first.
